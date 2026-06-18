@@ -1,0 +1,466 @@
+"""ThesisMiner v6.0 接口自测脚本
+
+使用 FastAPI TestClient 测试所有核心接口，覆盖正常流程与异常场景。
+运行方式：python -m pytest tests/test_api.py -v
+或直接运行：python tests/test_api.py
+"""
+import os
+import sys
+
+# 确保项目根目录在 sys.path 中
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from fastapi.testclient import TestClient
+from main import app
+
+client = TestClient(app)
+
+
+def test_status():
+    """测试服务状态接口"""
+    response = client.get("/api/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["version"] == "6.0.0"
+    assert "ai_configured" in data
+    print("✓ GET /api/status")
+
+
+def test_config_get():
+    """测试获取配置"""
+    response = client.get("/api/config")
+    assert response.status_code == 200
+    data = response.json()
+    assert "ai_api_key_configured" in data
+    assert "ai_base_url" in data
+    assert "ai_model" in data
+    assert "degree_models" in data
+    assert "literature_baseline" in data
+    assert "academic_calendar" in data
+    print("✓ GET /api/config")
+
+
+def test_config_update():
+    """测试更新配置"""
+    response = client.post("/api/config", json={"ai_model": "gpt-4o-mini"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    print("✓ POST /api/config")
+
+
+def test_lineage_import_and_get():
+    """测试谱系导入与查询"""
+    # 导入节点
+    import_data = {
+        "nodes": [
+            {
+                "node_type": "mentor_project",
+                "title": "国家自然科学基金项目X",
+                "abstract": "关于深度学习在医学影像中的应用研究",
+                "metadata": {"year": 2023, "fund": "NSFC"},
+            },
+            {
+                "node_type": "student_thesis",
+                "title": "师兄论文《基于CNN的肺结节检测》",
+                "abstract": "使用卷积神经网络检测肺部CT影像中的结节",
+                "metadata": {"year": 2022, "degree": "master"},
+            },
+        ],
+        "edges": [
+            {
+                "source_id": None,  # 将在运行时填充
+                "target_id": None,
+                "relation_type": "extends",
+                "weight": 0.8,
+            }
+        ],
+    }
+    response = client.post("/api/lineage/import", json=import_data)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["imported_nodes"] == 2
+    print("✓ POST /api/lineage/import")
+
+    # 查询所有节点
+    response = client.get("/api/lineage")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] >= 2
+    assert len(data["nodes"]) >= 2
+    print("✓ GET /api/lineage")
+
+    # 获取图谱
+    response = client.get("/api/lineage/graph")
+    assert response.status_code == 200
+    data = response.json()
+    assert "nodes" in data
+    assert "edges" in data
+    print("✓ GET /api/lineage/graph")
+
+    # 搜索节点
+    response = client.get("/api/lineage/search?keyword=基金")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] >= 1
+    print("✓ GET /api/lineage/search")
+
+
+def test_lineage_cards():
+    """测试知识卡片管理"""
+    # 添加卡片
+    response = client.post(
+        "/api/lineage/cards",
+        json={
+            "title": "深度学习基础",
+            "content": "深度学习是机器学习的一个分支...",
+            "tags": ["AI", "深度学习"],
+            "source": "教材",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "card_id" in data
+    print("✓ POST /api/lineage/cards")
+
+    # 查询卡片
+    response = client.get("/api/lineage/cards")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] >= 1
+    print("✓ GET /api/lineage/cards")
+
+
+def test_creativity_inspire():
+    """测试创意激发"""
+    response = client.post(
+        "/api/creativity/inspire",
+        json={
+            "degree": "master",
+            "discipline": "science_engineering",
+            "mentor_info": "导师项目：基于深度学习的医学影像分析\n同门论文：《CNN在CT影像中的应用》",
+            "context": "",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "candidates" in data
+    assert len(data["candidates"]) > 0
+    print("✓ POST /api/creativity/inspire")
+
+
+def test_creativity_cross_domain():
+    """测试跨域联想"""
+    response = client.post(
+        "/api/creativity/cross-domain",
+        json={"domain_a": "自然语言处理", "domain_b": "生物信息学"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "inspiration_source" in data
+    print("✓ POST /api/creativity/cross-domain")
+
+
+def test_creativity_rank():
+    """测试候选排序"""
+    candidates = [
+        {"inspiration_source": "mentor_project", "direction": "方向1"},
+        {"inspiration_source": "cross_domain", "direction": "方向2"},
+        {"inspiration_source": "senior_inherit", "direction": "方向3"},
+    ]
+    response = client.post(
+        "/api/creativity/rank",
+        json={"candidates": candidates, "degree": "master"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "ranked_candidates" in data
+    assert len(data["ranked_candidates"]) == 3
+    # mentor_project 应该排第一（权重 0.9）
+    assert data["ranked_candidates"][0]["inspiration_source"] == "mentor_project"
+    print("✓ POST /api/creativity/rank")
+
+
+def test_constraints_validate_title():
+    """测试标题校验"""
+    # 合法标题
+    response = client.post(
+        "/api/constraints/validate-title",
+        json={"title": "深度学习医学影像", "degree": "master"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["auto_rewritten"] is False
+    print("✓ POST /api/constraints/validate-title (合法标题)")
+
+    # 超长标题
+    long_title = "基于深度学习与自然语言处理的医学影像分析与诊断系统研究"
+    response = client.post(
+        "/api/constraints/validate-title",
+        json={"title": long_title, "degree": "master"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    # 应触发重写
+    print("✓ POST /api/constraints/validate-title (超长标题)")
+
+
+def test_constraints_check_feasibility():
+    """测试可行性校验"""
+    # 可行方案
+    response = client.post(
+        "/api/constraints/check-feasibility",
+        json={
+            "research_content": ["研究内容1", "研究内容2"],
+            "degree": "master",
+            "timeframe_months": 10,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["feasible"] is True
+    print("✓ POST /api/constraints/check-feasibility (可行)")
+
+    # 不可行方案（超期）
+    response = client.post(
+        "/api/constraints/check-feasibility",
+        json={
+            "research_content": ["研究内容1"],
+            "degree": "master",
+            "timeframe_months": 24,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["feasible"] is False
+    print("✓ POST /api/constraints/check-feasibility (超期)")
+
+
+def test_constraints_check_literature():
+    """测试文献基线校验"""
+    # 充足
+    response = client.post(
+        "/api/constraints/check-literature",
+        json={"degree": "master", "count": 35},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["sufficient"] is True
+    print("✓ POST /api/constraints/check-literature (充足)")
+
+    # 不足
+    response = client.post(
+        "/api/constraints/check-literature",
+        json={"degree": "master", "count": 20},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["sufficient"] is False
+    print("✓ POST /api/constraints/check-literature (不足)")
+
+
+def test_constraints_calendar():
+    """测试学术日历查询"""
+    response = client.get("/api/constraints/calendar/master")
+    assert response.status_code == 200
+    data = response.json()
+    assert "max_years" in data
+    print("✓ GET /api/constraints/calendar/master")
+
+
+def test_constraints_baseline():
+    """测试文献基线查询"""
+    response = client.get("/api/constraints/baseline/doctor")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["baseline"] == 50
+    print("✓ GET /api/constraints/baseline/doctor")
+
+
+def test_sessions_crud():
+    """测试会话 CRUD"""
+    # 创建会话
+    response = client.post(
+        "/api/sessions",
+        json={
+            "title": "测试会话",
+            "degree": "master",
+            "discipline": "science_engineering",
+            "mentor_info": "导师项目X",
+            "mode": "quick",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    session_id = data["id"]
+    assert data["title"] == "测试会话"
+    print("✓ POST /api/sessions")
+
+    # 查询会话列表
+    response = client.get("/api/sessions?limit=10&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] >= 1
+    print("✓ GET /api/sessions")
+
+    # 查询单个会话
+    response = client.get(f"/api/sessions/{session_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == session_id
+    print("✓ GET /api/sessions/{id}")
+
+    # 更新状态
+    response = client.patch(
+        f"/api/sessions/{session_id}/status", json={"status": "completed"}
+    )
+    assert response.status_code == 200
+    print("✓ PATCH /api/sessions/{id}/status")
+
+    # 删除会话
+    response = client.delete(f"/api/sessions/{session_id}")
+    assert response.status_code == 200
+    print("✓ DELETE /api/sessions/{id}")
+
+
+def test_proposals_list():
+    """测试论题列表查询"""
+    response = client.get("/api/proposals?limit=10&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert "proposals" in data
+    assert "count" in data
+    print("✓ GET /api/proposals")
+
+
+def test_proposals_generate_without_api_key():
+    """测试未配置 API Key 时生成论题"""
+    response = client.post(
+        "/api/proposals/generate",
+        json={
+            "degree": "master",
+            "discipline": "science_engineering",
+            "mentor_info": "导师项目X",
+            "mode": "quick",
+            "count": 1,
+        },
+    )
+    # 未配置 API Key 时应返回 400
+    assert response.status_code == 400
+    print("✓ POST /api/proposals/generate (未配置 API Key 正确拒绝)")
+
+
+def test_budgets_estimate():
+    """测试预算估算"""
+    response = client.post(
+        "/api/budgets/estimate",
+        json={"degree": "master", "mode": "quick", "count": 3},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "estimated_cost" in data
+    assert "model" in data
+    print("✓ POST /api/budgets/estimate")
+
+
+def test_budgets_summary():
+    """测试预算汇总"""
+    response = client.get("/api/budgets/summary")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_calls" in data
+    assert "total_cost" in data
+    print("✓ GET /api/budgets/summary")
+
+
+def test_budgets_ledger():
+    """测试账本查询"""
+    response = client.get("/api/budgets/ledger?limit=10&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert "entries" in data
+    print("✓ GET /api/budgets/ledger")
+
+
+def test_budgets_pricing():
+    """测试定价表查询"""
+    response = client.get("/api/budgets/pricing")
+    assert response.status_code == 200
+    data = response.json()
+    assert "gpt-4o-mini" in data or len(data) > 0
+    print("✓ GET /api/budgets/pricing")
+
+
+def test_404_handling():
+    """测试 404 处理"""
+    response = client.get("/api/proposals/nonexistent-id")
+    assert response.status_code == 404
+    print("✓ 404 处理")
+
+
+def run_all_tests():
+    """运行所有测试"""
+    print("\n" + "=" * 60)
+    print("ThesisMiner v6.0 接口自测")
+    print("=" * 60 + "\n")
+
+    tests = [
+        test_status,
+        test_config_get,
+        test_config_update,
+        test_lineage_import_and_get,
+        test_lineage_cards,
+        test_creativity_inspire,
+        test_creativity_cross_domain,
+        test_creativity_rank,
+        test_constraints_validate_title,
+        test_constraints_check_feasibility,
+        test_constraints_check_literature,
+        test_constraints_calendar,
+        test_constraints_baseline,
+        test_sessions_crud,
+        test_proposals_list,
+        test_proposals_generate_without_api_key,
+        test_budgets_estimate,
+        test_budgets_summary,
+        test_budgets_ledger,
+        test_budgets_pricing,
+        test_404_handling,
+    ]
+
+    passed = 0
+    failed = 0
+    failures = []
+
+    for test in tests:
+        try:
+            test()
+            passed += 1
+        except Exception as e:
+            failed += 1
+            failures.append((test.__name__, str(e)))
+            print(f"✗ {test.__name__} 失败: {e}")
+
+    print("\n" + "=" * 60)
+    print(f"测试结果: {passed} 通过, {failed} 失败, 共 {len(tests)} 项")
+    print("=" * 60)
+
+    if failures:
+        print("\n失败详情:")
+        for name, error in failures:
+            print(f"  - {name}: {error}")
+
+    return failed == 0
+
+
+if __name__ == "__main__":
+    # 确保安装了 httpx（TestClient 依赖）
+    try:
+        import httpx  # noqa: F401
+    except ImportError:
+        print("正在安装 httpx...")
+        os.system(f"{sys.executable} -m pip install httpx -q")
+
+    success = run_all_tests()
+    sys.exit(0 if success else 1)

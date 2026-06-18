@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="ThesisMiner v6.0 - 学术语境驱动的实战论题生成与开题架构" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>ThesisMiner v6.0 · 学术论题生成系统</title>
+
+  <!-- Google Fonts: Fraunces / DM Sans / Noto Serif SC / Noto Sans SC / JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Tailwind 主题对齐 Editorial Academic 设计令牌
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            ink: {
+              primary: '#0f1115',
+              secondary: '#1a1d24',
+              tertiary: '#232730',
+              elevated: '#2d323d',
+            },
+            paper: {
+              primary: '#f5f1e8',
+              secondary: '#a8a39a',
+              muted: '#6b6862',
+            },
+            amber: {
+              DEFAULT: '#d4a574',
+              deep: '#c8956d',
+            },
+          },
+          fontFamily: {
+            display: ['Fraunces', 'Noto Serif SC', 'serif'],
+            body: ['DM Sans', 'Noto Sans SC', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- 自定义设计系统 -->
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- ===================== 侧边导航栏 ===================== -->
+    <aside class="sidebar">
+      <!-- Logo 区域 -->
+      <div class="sidebar__logo">
+        <div class="sidebar__logo-title">
+          <span><span class="logo-mark">Thesis</span>Miner</span>
+          <span class="sidebar__logo-version">v6.0</span>
+        </div>
+        <div class="sidebar__logo-subtitle">学术论题生成系统</div>
+      </div>
+
+      <!-- 导航项（由 app.js 动态渲染） -->
+      <nav class="sidebar__nav" aria-label="主导航"></nav>
+
+      <!-- 底部 AI 配置状态指示灯 -->
+      <div class="sidebar__footer">
+        <div class="ai-status" title="AI 服务配置状态">
+          <span class="ai-status__dot unconfigured"></span>
+          <span class="ai-status__text">AI 未配置</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===================== 主内容区 ===================== -->
+    <main class="main-content">
+      <div id="app-content">
+        <!-- 初始加载占位 -->
+        <div class="loading-overlay">
+          <div class="spinner spinner--lg"></div>
+          <div>正在加载学术殿堂…</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== 全局通知容器 ===================== -->
+  <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- ===================== 详情抽屉容器 ===================== -->
+  <div id="drawer-container"></div>
+
+  <!-- ===================== 脚本：按依赖顺序加载 ===================== -->
+  <!-- API 客户端（基础依赖） -->
+  <script src="scripts/api.js"></script>
+  <!-- 应用主逻辑（路由 / 状态 / 工具） -->
+  <script src="scripts/app.js"></script>
+  <!-- 各页面脚本按需在 app.js 中通过 loadPageScript 动态加载 -->
+</body>
+</html>
