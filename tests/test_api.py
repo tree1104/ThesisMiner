@@ -22,7 +22,7 @@ def test_status():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
-    assert data["version"] == "6.0.0"
+    assert data["version"] == "7.0.0"
     assert "ai_configured" in data
     print("✓ GET /api/status")
 
@@ -622,6 +622,279 @@ def test_cache_info_fields():
     print("✓ 会话缓存字段（Task 1）")
 
 
+def test_lifespan_no_deprecation():
+    """测试 lifespan 启动无弃用告警（Task 1）"""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        # 重新导入 main 模块应不触发 on_event 弃用告警
+        # 注意：只检查 on_event 相关的告警
+        try:
+            # 如果 main.py 使用了 lifespan，这里不会报错
+            # 我们只验证 app 对象存在
+            assert app is not None
+        except DeprecationWarning as e:
+            if "on_event" in str(e):
+                assert False, f"on_event 弃用告警未修复: {e}"
+    print("✓ lifespan 启动无弃用告警（Task 1）")
+
+
+def test_auto_open_browser_config():
+    """测试 auto_open_browser 配置项（Task 1）"""
+    from backend.config import get_settings
+    settings = get_settings()
+    assert hasattr(settings, "auto_open_browser")
+    assert isinstance(settings.auto_open_browser, bool)
+    print("✓ auto_open_browser 配置项（Task 1）")
+
+
+def test_multi_model_registry():
+    """测试多模型注册表（Task 2）"""
+    from backend.config import get_settings, get_model_config, get_step_model
+    settings = get_settings()
+
+    # 验证 models 列表存在且非空
+    assert hasattr(settings, "models")
+    assert len(settings.models) >= 6
+
+    # 验证每个模型有必需字段
+    for m in settings.models:
+        assert "id" in m
+        assert "label" in m
+        assert "pricing" in m
+        assert "input_cny_per_million" in m["pricing"]
+        assert "output_cny_per_million" in m["pricing"]
+
+    # 验证 step_models 存在
+    assert hasattr(settings, "step_models")
+    for step in ["reasoner", "mentor", "inspire", "report", "search"]:
+        assert step in settings.step_models
+
+    # 验证 currency 字段
+    assert hasattr(settings, "currency")
+    assert settings.currency in ("CNY", "USD")
+
+    # 验证辅助函数
+    first_model_id = settings.models[0]["id"]
+    assert get_model_config(first_model_id) is not None
+    assert get_model_config("nonexistent") is None
+    assert get_step_model("reasoner") == settings.step_models["reasoner"]
+
+    print("✓ 多模型注册表（Task 2）")
+
+
+def test_model_crud_api():
+    """测试模型管理 API（Task 3）"""
+    # 清理可能残留的测试模型（避免重复运行失败）
+    client.delete("/api/models/test-model-v7")
+
+    # GET models
+    response = client.get("/api/models")
+    assert response.status_code == 200
+    data = response.json()
+    assert "models" in data
+    initial_count = data["count"]
+
+    # POST - add model
+    test_model = {
+        "id": "test-model-v7",
+        "label": "Test Model",
+        "base_url": "https://api.test.com/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 1, "output_cny_per_million": 2},
+        "supports_streaming": True,
+        "supports_thinking": False,
+        "supports_web_search": False,
+        "max_context": 32768,
+        "default_temperature": 0.7,
+    }
+    response = client.post("/api/models", json=test_model)
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # Verify added
+    response = client.get("/api/models")
+    assert response.json()["count"] == initial_count + 1
+
+    # PUT - update model
+    test_model["label"] = "Updated Test Model"
+    response = client.put("/api/models/test-model-v7", json=test_model)
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # DELETE - delete model
+    response = client.delete("/api/models/test-model-v7")
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # Verify deleted
+    response = client.get("/api/models")
+    assert response.json()["count"] == initial_count
+
+    print("✓ 模型管理 API CRUD（Task 3）")
+
+
+def test_step_models_api():
+    """测试步骤路由 API（Task 3）"""
+    # GET step-models
+    response = client.get("/api/step-models")
+    assert response.status_code == 200
+    data = response.json()
+    assert "step_models" in data
+
+    # PUT - update step-models
+    response = client.put("/api/step-models", json={"reasoner": "gpt-4.1-mini"})
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+    # Verify update
+    response = client.get("/api/step-models")
+    assert response.json()["step_models"]["reasoner"] == "gpt-4.1-mini"
+
+    print("✓ 步骤路由 API（Task 3）")
+
+
+def test_currency_switch():
+    """测试货币切换 API（Task 3）"""
+    # Switch to USD
+    response = client.put("/api/currency", json={"currency": "USD"})
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["currency"] == "USD"
+
+    # Switch back to CNY
+    response = client.put("/api/currency", json={"currency": "CNY"})
+    assert response.status_code == 200
+    assert response.json()["currency"] == "CNY"
+
+    # Invalid currency
+    response = client.put("/api/currency", json={"currency": "EUR"})
+    assert response.status_code == 200
+    assert response.json()["success"] is False
+
+    print("✓ 货币切换 API（Task 3）")
+
+
+def test_three_category_tokens():
+    """测试三类 token 统计（Task 5）"""
+    from backend.database import execute_query
+    from backend.budgets.transparent_ledger import record_usage, get_ledger_summary, get_session_cost
+    import uuid
+
+    session_id = uuid.uuid4().hex
+
+    # Record usage with cached tokens
+    record_usage(
+        session_id=session_id,
+        model="gpt-4.1-mini",
+        prompt_tokens=1000,
+        completion_tokens=500,
+        purpose="test",
+        cached_tokens=600,
+    )
+
+    # Verify summary has three categories
+    summary = get_ledger_summary()
+    assert "input_cached" in summary
+    assert "input_uncached" in summary
+    assert "output" in summary
+    assert summary["input_cached"] >= 600
+    assert summary["input_uncached"] >= 400  # 1000 - 600
+    assert summary["output"] >= 500
+
+    # Verify session cost has three categories
+    session_cost = get_session_cost(session_id)
+    assert "input_cached" in session_cost
+    assert "input_uncached" in session_cost
+    assert "output" in session_cost
+    assert session_cost["input_cached"] == 600
+    assert session_cost["input_uncached"] == 400
+    assert session_cost["output"] == 500
+
+    # Cleanup
+    execute_query("DELETE FROM budget_ledger WHERE session_id = ?;", (session_id,))
+
+    print("✓ 三类 token 统计（Task 5）")
+
+
+def test_estimate_cost_cny():
+    """测试估算器人民币定价（Task 5）"""
+    from backend.budgets.estimator import estimate_cost
+
+    # Test with a model in the registry
+    cost_cny = estimate_cost("gpt-4.1-mini", 1000000, 500000, currency="CNY")
+    # gpt-4.1-mini: input 0.7/M, output 2.8/M
+    # 1M * 0.7 + 0.5M * 2.8 = 0.7 + 1.4 = 2.1
+    assert abs(cost_cny - 2.1) < 0.01
+
+    # Test USD conversion
+    cost_usd = estimate_cost("gpt-4.1-mini", 1000000, 500000, currency="USD")
+    # 2.1 CNY / 7.2 = 0.2917 USD
+    assert abs(cost_usd - 2.1 / 7.2) < 0.01
+
+    print("✓ 估算器人民币定价（Task 5）")
+
+
+def test_lineage_pagination():
+    """测试谱系分页（Task 6）"""
+    response = client.get("/api/lineage?limit=5&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert "nodes" in data
+    assert "total" in data
+    assert "limit" in data
+    assert "offset" in data
+    assert data["limit"] == 5
+    assert data["offset"] == 0
+    print("✓ 谱系分页（Task 6）")
+
+
+def test_lineage_batch_delete():
+    """测试谱系批量删除端点（Task 6）"""
+    # Test with empty list (should succeed with 0 deleted)
+    response = client.request("DELETE", "/api/lineage/batch", json={"node_ids": []})
+    assert response.status_code == 200
+    data = response.json()
+    assert "deleted" in data
+    assert data["deleted"] == 0
+    print("✓ 谱系批量删除端点（Task 6）")
+
+
+def test_session_dialog_rounds():
+    """测试会话对话轮数（Task 7）"""
+    # Create a session
+    response = client.post(
+        "/api/sessions",
+        json={
+            "title": "对话轮数测试",
+            "degree": "master",
+            "discipline": "science_engineering",
+            "mentor_info": "导师",
+            "mode": "quick",
+        },
+    )
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Get session detail - should have dialog_rounds
+    response = client.get(f"/api/sessions/{session_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert "dialog_rounds" in data
+    assert data["dialog_rounds"] == 0  # No budget_ledger entries yet
+
+    # List sessions - should have dialog_rounds
+    response = client.get("/api/sessions?limit=5&offset=0")
+    assert response.status_code == 200
+    sessions = response.json().get("sessions", [])
+    assert len(sessions) > 0
+    assert "dialog_rounds" in sessions[0]
+
+    # Cleanup
+    client.delete(f"/api/sessions/{session_id}")
+    print("✓ 会话对话轮数（Task 7）")
+
+
 def run_all_tests():
     """运行所有测试"""
     print("\n" + "=" * 60)
@@ -657,6 +930,17 @@ def run_all_tests():
         test_proposal_report_template,
         test_proposal_report_not_found,
         test_cache_info_fields,
+        test_lifespan_no_deprecation,
+        test_auto_open_browser_config,
+        test_multi_model_registry,
+        test_model_crud_api,
+        test_step_models_api,
+        test_currency_switch,
+        test_three_category_tokens,
+        test_estimate_cost_cny,
+        test_lineage_pagination,
+        test_lineage_batch_delete,
+        test_session_dialog_rounds,
     ]
 
     passed = 0

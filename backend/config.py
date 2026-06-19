@@ -3,6 +3,7 @@
 负责加载 .env 环境变量与 data/config.json 用户配置，
 提供全局单例 Settings 与按学位分级的模型路由常量。
 """
+import copy
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,92 @@ LITERATURE_BASELINE = {
 ACADEMIC_CALENDAR = {
     "master": {"max_years": 1, "description": "硕士1年内出结果"},
     "doctor": {"max_years": 2, "description": "博士2年内出结果"},
+}
+
+# 默认多模型注册表（v7.0 新增）
+# 每个模型包含定价、能力标记与上下文长度等元信息
+DEFAULT_MODELS = [
+    {
+        "id": "gpt-4.1-mini",
+        "label": "GPT-4.1 Mini",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 0.7, "output_cny_per_million": 2.8},
+        "supports_streaming": True,
+        "supports_thinking": False,
+        "supports_web_search": False,
+        "max_context": 1000000,
+        "default_temperature": 0.7,
+    },
+    {
+        "id": "gpt-4.1",
+        "label": "GPT-4.1",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 14, "output_cny_per_million": 56},
+        "supports_streaming": True,
+        "supports_thinking": False,
+        "supports_web_search": False,
+        "max_context": 1000000,
+        "default_temperature": 0.7,
+    },
+    {
+        "id": "deepseek-chat-v3",
+        "label": "DeepSeek V3 Chat",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 1, "output_cny_per_million": 4},
+        "supports_streaming": True,
+        "supports_thinking": False,
+        "supports_web_search": False,
+        "max_context": 64000,
+        "default_temperature": 0.7,
+    },
+    {
+        "id": "deepseek-reasoner",
+        "label": "DeepSeek Reasoner (R1)",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 4, "output_cny_per_million": 16},
+        "supports_streaming": True,
+        "supports_thinking": True,
+        "supports_web_search": False,
+        "max_context": 64000,
+        "default_temperature": 0.0,
+    },
+    {
+        "id": "qwen-plus",
+        "label": "Qwen Plus",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 0.8, "output_cny_per_million": 2},
+        "supports_streaming": True,
+        "supports_thinking": False,
+        "supports_web_search": True,
+        "max_context": 131072,
+        "default_temperature": 0.7,
+    },
+    {
+        "id": "qwen-max",
+        "label": "Qwen Max",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 2.4, "output_cny_per_million": 9.6},
+        "supports_streaming": True,
+        "supports_thinking": False,
+        "supports_web_search": True,
+        "max_context": 32768,
+        "default_temperature": 0.7,
+    },
+]
+
+# 各步骤默认模型映射（v7.0 新增）
+DEFAULT_STEP_MODELS = {
+    "reasoner": "gpt-4.1-mini",
+    "mentor": "gpt-4.1-mini",
+    "inspire": "gpt-4.1-mini",
+    "report": "gpt-4.1-mini",
+    "search": "gpt-4.1-mini",
 }
 
 
@@ -64,6 +151,16 @@ class Settings:
             "arxiv": os.getenv("SEARCH_API_KEYS_ARXIV", ""),
             "semantic_scholar": os.getenv("SEARCH_API_KEYS_SEMANTIC_SCHOLAR", ""),
         }
+
+        # 多模型注册表与步骤路由（v7.0 新增）
+        # ai_api_key / ai_base_url / ai_model 作为默认模型，
+        # 当某模型的 api_key 为空时回退到 settings.ai_api_key
+        self.auto_open_browser: bool = _str_to_bool(
+            os.getenv("AUTO_OPEN_BROWSER", "true")
+        )
+        self.models: list[dict] = copy.deepcopy(DEFAULT_MODELS)
+        self.step_models: dict = copy.deepcopy(DEFAULT_STEP_MODELS)
+        self.currency: str = os.getenv("CURRENCY", "CNY")
 
         # 若存在用户配置文件，则覆盖默认值
         self._load_user_config()
@@ -108,6 +205,30 @@ class Settings:
                 ),
             }
 
+        # 多模型注册表与步骤路由（v7.0 新增）
+        if "models" in user_config and isinstance(user_config["models"], list):
+            self.models = user_config["models"]
+        if "step_models" in user_config and isinstance(
+            user_config["step_models"], dict
+        ):
+            # 合并，保留默认键
+            saved = user_config["step_models"]
+            self.step_models = {
+                "reasoner": saved.get("reasoner", DEFAULT_STEP_MODELS["reasoner"]),
+                "mentor": saved.get("mentor", DEFAULT_STEP_MODELS["mentor"]),
+                "inspire": saved.get("inspire", DEFAULT_STEP_MODELS["inspire"]),
+                "report": saved.get("report", DEFAULT_STEP_MODELS["report"]),
+                "search": saved.get("search", DEFAULT_STEP_MODELS["search"]),
+            }
+        if "currency" in user_config:
+            self.currency = (
+                user_config["currency"]
+                if user_config["currency"] in ("CNY", "USD")
+                else "CNY"
+            )
+        if "auto_open_browser" in user_config:
+            self.auto_open_browser = bool(user_config["auto_open_browser"])
+
 
 # 单例缓存
 _settings_instance: Settings | None = None
@@ -119,6 +240,43 @@ def get_settings() -> Settings:
     if _settings_instance is None:
         _settings_instance = Settings()
     return _settings_instance
+
+
+def get_model_config(model_id: str) -> dict | None:
+    """根据 model_id 获取模型配置。
+
+    Args:
+        model_id: 模型唯一标识
+
+    Returns:
+        模型配置字典，找不到返回 None
+    """
+    settings = get_settings()
+    for model in settings.models:
+        if model.get("id") == model_id:
+            return model
+    return None
+
+
+def get_step_model(purpose: str) -> str:
+    """根据调用用途获取对应的模型 ID。
+
+    优先级：step_models[purpose] > models[0].id > ai_model
+
+    Args:
+        purpose: 调用用途（reasoner/mentor/inspire/report/search）
+
+    Returns:
+        模型 ID 字符串
+    """
+    settings = get_settings()
+    model_id = settings.step_models.get(purpose)
+    if model_id and get_model_config(model_id):
+        return model_id
+    # 回退到第一个模型
+    if settings.models:
+        return settings.models[0].get("id", settings.ai_model)
+    return settings.ai_model
 
 
 def save_config(settings_dict: dict) -> None:

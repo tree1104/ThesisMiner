@@ -1,4 +1,4 @@
-# ThesisMiner v6.0 实现问题总结
+# ThesisMiner v7.0 实现问题总结
 
 ## 日期：2026-06-19
 ## 状态：全部已解决
@@ -253,3 +253,42 @@
   4. `settings.js` 增加「文献检索配置」卡片与真实检索开关按钮。
   5. 新增 API 方法：`getSearchStatus`、`updateSearchConfig`、`streamGenerateProposals`。
 - **涉及文件**：`frontend/scripts/api.js`、`frontend/scripts/pages/generate.js`、`frontend/scripts/pages/settings.js`、`frontend/scripts/pages/sessions.js`
+
+---
+
+## 五、v7.0 多模型与精细预算增强
+
+### 20. on_event 启动钩子弃用
+- **问题描述**：FastAPI 的 `@app.on_event("startup")` 已弃用，产生 DeprecationWarning
+- **解决思路**：用 `asynccontextmanager` 实现的 `lifespan` 异步上下文管理器替换，在 lifespan 中初始化数据库并按配置自动打开浏览器
+- **涉及文件**：`main.py`
+
+### 21. 单一 AI 模型无法满足多步骤差异化需求
+- **问题描述**：v6 仅支持单一 `ai_model` 配置，不同步骤（生成/评审/报告/检索）无法使用不同模型
+- **解决思路**：新增多模型注册表（`models` 列表，每项含 id/label/base_url/api_key/pricing/能力开关），新增 `step_models` 按步骤路由（reasoner/mentor/inspire/report/search），`call_llm` 模型选择优先级：显式参数 > `step_models[purpose]` > `ai_model`
+- **涉及文件**：`backend/config.py`、`backend/ai/ai_proxy.py`、`backend/routes/config.py`
+
+### 22. 定价硬编码且单位为美元/千token
+- **问题描述**：`MODEL_PRICING` 硬编码且按美元/千token计价，无法自定义模型定价，不支持人民币
+- **解决思路**：定价单位改为元/百万token，从 `models` 注册表读取定价，回退到 `MODEL_PRICING_LEGACY_USD`；新增 `currency` 配置（CNY/USD），`estimate_cost` 支持 `currency` 参数
+- **涉及文件**：`backend/budgets/estimator.py`、`backend/config.py`
+
+### 23. Token 统计无缓存命中细分
+- **问题描述**：`budget_ledger` 仅记录 `prompt_tokens`/`completion_tokens`，无法区分缓存命中与未命中
+- **解决思路**：`budget_ledger` 新增 `cached_prompt_tokens` 列，`record_usage` 接收 `cached_tokens` 参数，`get_ledger_summary`/`get_session_cost` 返回 `input_cached`/`input_uncached`/`output` 三类细分
+- **涉及文件**：`backend/database.py`、`backend/budgets/transparent_ledger.py`
+
+### 24. 谱系管理无分页与批量操作
+- **问题描述**：节点列表全量加载，无分页，仅支持单个删除
+- **解决思路**：`GET /api/lineage` 支持 `limit`/`offset` 分页返回 `total`，新增 `DELETE /api/lineage/batch` 批量删除端点，前端分页（每页20条）+ 复选框 + 全选 + 批量删除按钮
+- **涉及文件**：`backend/routes/lineage.py`、`frontend/scripts/pages/lineage.js`
+
+### 25. 缺少会话对话轮数统计
+- **问题描述**：无法直观查看每个会话的 AI 调用次数
+- **解决思路**：会话列表与详情端点关联查询 `budget_ledger` 统计调用次数，返回 `dialog_rounds` 字段，前端卡片与详情抽屉显示"对话 N 轮"
+- **涉及文件**：`backend/routes/sessions.py`、`frontend/scripts/pages/sessions.js`
+
+### 26. 前端缺少全局 API 状态指示
+- **问题描述**：用户无法在全局层面感知 AI 配置状态
+- **解决思路**：顶栏新增连接状态徽章（已配置/未配置/连接失败），启动时调用 `GET /api/status` 检测，设置页测试连接后同步更新
+- **涉及文件**：`frontend/scripts/app.js`、`frontend/scripts/pages/settings.js`

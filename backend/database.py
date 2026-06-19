@@ -131,6 +131,7 @@ def init_db() -> None:
                 prompt_tokens INTEGER,
                 completion_tokens INTEGER,
                 total_tokens INTEGER,
+                cached_prompt_tokens INTEGER DEFAULT 0,
                 cost REAL,
                 purpose TEXT,
                 created_at TEXT,
@@ -182,6 +183,14 @@ def migrate_db() -> None:
         # 缺失则补齐 cache_hit_rate 列
         if "cache_hit_rate" not in existing_columns:
             cursor.execute("ALTER TABLE sessions ADD COLUMN cache_hit_rate REAL;")
+
+        # 检查 budget_ledger 表是否有 cached_prompt_tokens 列（v7.0 三类 token 统计）
+        cursor.execute("PRAGMA table_info(budget_ledger);")
+        ledger_columns = {row["name"] for row in cursor.fetchall()}
+        if "cached_prompt_tokens" not in ledger_columns:
+            cursor.execute(
+                "ALTER TABLE budget_ledger ADD COLUMN cached_prompt_tokens INTEGER DEFAULT 0;"
+            )
 
         conn.commit()
 

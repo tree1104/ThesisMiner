@@ -2,6 +2,9 @@
 
 封装 OpenAI 客户端的创建、配置检查、异步调用、JSON 解析与流式调用，
 并在每次调用后通过透明账本记录 token 用量与费用。
+
+v7.0 升级为多模型架构：按 model_id 缓存独立客户端，支持步骤路由、
+参数透传（max_tokens / enable_thinking / web_search）与思维链分流。
 """
 import re
 from typing import AsyncIterator, Optional
@@ -9,7 +12,7 @@ from typing import AsyncIterator, Optional
 import json5
 import openai
 
-from backend.config import get_settings
+from backend.config import get_model_config, get_settings, get_step_model
 from backend.budgets.estimator import estimate_cost
 from backend.budgets.transparent_ledger import record_usage
 from backend.ai.prompts import (
@@ -17,27 +20,45 @@ from backend.ai.prompts import (
     compute_prefix_hash,
 )
 
-# 模块级客户端缓存，避免每次调用都创建新客户端
-_client: Optional[openai.AsyncOpenAI] = None
+# 模块级客户端缓存，按 model_id 维度缓存（v7.0 多模型支持）
+_clients: dict[str, openai.AsyncOpenAI] = {}
 
 
-def get_client() -> openai.AsyncOpenAI:
-    """创建并返回 OpenAI 异步客户端实例（带模块级缓存）。
+def get_client(model_id: str = None) -> openai.AsyncOpenAI:
+    """创建并返回指定模型的 OpenAI 异步客户端（带按 model_id 缓存）。
 
-    从全局 settings 读取 api_key 与 base_url。
-    首次调用时创建客户端并缓存，后续调用直接复用。
+    根据 model_id 从模型注册表读取 base_url 和 api_key。
+    若模型 api_key 为空，回退到 settings.ai_api_key。
+
+    Args:
+        model_id: 模型唯一标识，为 None 时使用 settings.ai_model。
 
     Returns:
         配置好的 openai.AsyncOpenAI 客户端。
     """
-    global _client
-    if _client is None:
-        settings = get_settings()
-        _client = openai.AsyncOpenAI(
-            api_key=settings.ai_api_key,
-            base_url=settings.ai_base_url,
-        )
-    return _client
+    settings = get_settings()
+
+    # 确定实际使用的 model_id
+    if model_id is None:
+        model_id = settings.ai_model
+
+    # 命中缓存直接返回
+    if model_id in _clients:
+        return _clients[model_id]
+
+    # 从模型注册表获取配置
+    model_config = get_model_config(model_id)
+    if model_config:
+        base_url = model_config.get("base_url") or settings.ai_base_url
+        api_key = model_config.get("api_key") or settings.ai_api_key
+    else:
+        # 回退到默认配置
+        base_url = settings.ai_base_url
+        api_key = settings.ai_api_key
+
+    client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+    _clients[model_id] = client
+    return client
 
 
 def check_api_configured() -> bool:
@@ -54,31 +75,37 @@ async def call_llm(
     system_prompt: str,
     user_prompt: str,
     model: str = None,
-    temperature: float = 0.7,
+    temperature: float = None,
     session_id: str = None,
     purpose: str = "unknown",
     response_format: dict = None,
     prefix_hash: str = None,
+    extra_params: dict = None,
 ) -> dict:
-    """异步调用大语言模型并记录用量。
+    """异步调用大语言模型并记录用量（v7.0 多模型与参数透传）。
+
+    模型选择优先级：显式 model > step_models[purpose] > ai_model。
+    温度优先级：显式 temperature > 模型 default_temperature > 0.7。
 
     Args:
         system_prompt: 系统提示词。
         user_prompt: 用户提示词。
-        model: 模型名称，为 None 时使用 settings 中的默认模型。
-        temperature: 采样温度，默认 0.7。
+        model: 模型 ID，为 None 时按 purpose 路由。
+        temperature: 采样温度，为 None 时使用模型默认温度。
         session_id: 关联的会话 ID，用于账本记录。
-        purpose: 调用用途，用于账本记录。
+        purpose: 调用用途，用于模型路由与账本记录。
         response_format: 可选的响应格式约束，如 {"type": "json_object"}，
             仅在模型支持时生效，用于 JSON 模式重试。
         prefix_hash: 可选的缓存前缀哈希。提供时会在系统消息上注入
             cache_control 提示（Anthropic 风格，OpenAI 会忽略但无害），
             并附加一条带 prefix_hash 注释的系统消息便于调试。
+        extra_params: 透传参数，支持 max_tokens / enable_thinking / web_search，
+            按模型能力过滤后生效。
 
     Returns:
-        调用结果字典，包含 content、model、prompt_tokens、
-        completion_tokens、total_tokens、cost，以及当 prefix_hash
-        非空时附带 prefix_hash 与 cache_hit 字段。
+        调用结果字典，包含 content、model、prompt_tokens、completion_tokens、
+        total_tokens、cached_tokens、cost，以及当存在思维链时附带
+        reasoning_content，当 prefix_hash 非空时附带 prefix_hash 与 cache_hit。
 
     Raises:
         ValueError: 当 AI API Key 未配置时抛出。
@@ -86,9 +113,20 @@ async def call_llm(
     if not check_api_configured():
         raise ValueError("AI API Key 未配置，请在设置页配置")
 
-    settings = get_settings()
-    used_model = model if model else settings.ai_model
-    client = get_client()
+    # 模型选择优先级：显式 model > step_models[purpose] > ai_model
+    if model:
+        used_model = model
+    else:
+        used_model = get_step_model(purpose)
+
+    # 获取模型配置（可能为 None，回退到空字典）
+    model_config = get_model_config(used_model) or {}
+
+    # 温度：优先用参数，其次模型默认，最后 0.7
+    if temperature is None:
+        temperature = model_config.get("default_temperature", 0.7)
+
+    client = get_client(used_model)
 
     # 构建消息列表，系统提示在前，用户提示在后
     messages = [
@@ -113,6 +151,21 @@ async def call_llm(
     if response_format is not None:
         kwargs["response_format"] = response_format
 
+    # 透传 extra_params（按模型能力过滤）
+    if extra_params:
+        if extra_params.get("max_tokens"):
+            kwargs["max_tokens"] = extra_params["max_tokens"]
+        # DeepSeek 思考模式：reasoner 模型自动启用思考，无需额外参数
+        if extra_params.get("enable_thinking") and model_config.get(
+            "supports_thinking"
+        ):
+            pass
+        # 联网搜索（部分模型支持，通过 extra_body 传递）
+        if extra_params.get("web_search") and model_config.get(
+            "supports_web_search"
+        ):
+            kwargs["extra_body"] = {"enable_search": True}
+
     # 异步调用大模型
     response = await client.chat.completions.create(**kwargs)
 
@@ -120,18 +173,44 @@ async def call_llm(
     usage = response.usage
     prompt_tokens = usage.prompt_tokens if usage else 0
     completion_tokens = usage.completion_tokens if usage else 0
-    total_tokens = usage.total_tokens if usage else (prompt_tokens + completion_tokens)
+    total_tokens = usage.total_tokens if usage else (
+        prompt_tokens + completion_tokens
+    )
 
-    content = response.choices[0].message.content if response.choices else ""
+    # 提取缓存命中 token 数（OpenAI prompt_tokens_details.cached_tokens）
+    cached_tokens = 0
+    if (
+        usage
+        and hasattr(usage, "prompt_tokens_details")
+        and usage.prompt_tokens_details
+    ):
+        cached_tokens = (
+            getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
+        )
+
+    # 提取内容与思维链
+    content = ""
+    reasoning_content = None
+    if response.choices:
+        message = response.choices[0].message
+        content = message.content or ""
+        # DeepSeek 思维链字段
+        if hasattr(message, "reasoning_content") and message.reasoning_content:
+            reasoning_content = message.reasoning_content
+        # 也检查 reasoning 字段（部分模型）
+        elif hasattr(message, "reasoning") and message.reasoning:
+            reasoning_content = message.reasoning
+
     cost = estimate_cost(used_model, prompt_tokens, completion_tokens)
 
-    # 记录到透明账本（record_usage 为同步函数，直接调用即可）
+    # 记录到透明账本（传入 cached_tokens，Task 5 将启用写入）
     record_usage(
         session_id=session_id,
         model=used_model,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         purpose=purpose,
+        cached_tokens=cached_tokens,
     )
 
     result = {
@@ -140,14 +219,15 @@ async def call_llm(
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
+        "cached_tokens": cached_tokens,
         "cost": cost,
     }
+    if reasoning_content:
+        result["reasoning_content"] = reasoning_content
     # 当注入了缓存前缀时，附带缓存追踪信息
     if prefix_hash:
         result["prefix_hash"] = prefix_hash
-        # OpenAI 暂不返回缓存命中详情，默认标记为 False；
-        # 后续可结合 response 中的 cached_tokens 字段细化
-        result["cache_hit"] = False
+        result["cache_hit"] = cached_tokens > 0
     return result
 
 
@@ -284,18 +364,29 @@ async def call_llm_stream(
     system_prompt: str,
     user_prompt: str,
     model: str = None,
-    temperature: float = 0.7,
-) -> AsyncIterator[str]:
-    """异步流式调用大语言模型，逐块返回文本。
+    temperature: float = None,
+    session_id: str = None,
+    purpose: str = "unknown",
+    prefix_hash: str = None,
+    extra_params: dict = None,
+) -> AsyncIterator[dict]:
+    """异步流式调用大语言模型，支持思维链分流（v7.0）。
+
+    模型选择与温度策略与 call_llm 一致。
 
     Args:
         system_prompt: 系统提示词。
         user_prompt: 用户提示词。
-        model: 模型名称，为 None 时使用默认模型。
-        temperature: 采样温度，默认 0.7。
+        model: 模型 ID，为 None 时按 purpose 路由。
+        temperature: 采样温度，为 None 时使用模型默认温度。
+        session_id: 关联的会话 ID（预留，暂不记录流式用量）。
+        purpose: 调用用途，用于模型路由。
+        prefix_hash: 可选的缓存前缀哈希。
+        extra_params: 透传参数，支持 max_tokens / web_search。
 
     Yields:
-        每个增量文本块。
+        {"type": "reasoning", "content": "..."} - 思维链片段
+        {"type": "content", "content": "..."} - 正文片段
 
     Raises:
         ValueError: 当 AI API Key 未配置时抛出。
@@ -303,27 +394,58 @@ async def call_llm_stream(
     if not check_api_configured():
         raise ValueError("AI API Key 未配置，请在设置页配置")
 
-    settings = get_settings()
-    used_model = model if model else settings.ai_model
-    client = get_client()
+    # 模型选择优先级：显式 model > step_models[purpose] > ai_model
+    if model:
+        used_model = model
+    else:
+        used_model = get_step_model(purpose)
+
+    model_config = get_model_config(used_model) or {}
+    if temperature is None:
+        temperature = model_config.get("default_temperature", 0.7)
+
+    client = get_client(used_model)
+
+    # 构建消息列表
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ]
+    if prefix_hash:
+        messages[0]["cache_control"] = {"type": "ephemeral"}
+        messages.append(
+            {"role": "system", "content": f"[cache_prefix_id:{prefix_hash}]"}
+        )
+    messages.append({"role": "user", "content": user_prompt})
+
+    # 构建请求参数
+    kwargs = {
+        "model": used_model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if extra_params:
+        if extra_params.get("max_tokens"):
+            kwargs["max_tokens"] = extra_params["max_tokens"]
+        if extra_params.get("web_search") and model_config.get(
+            "supports_web_search"
+        ):
+            kwargs["extra_body"] = {"enable_search": True}
 
     # 异步流式调用
-    stream = await client.chat.completions.create(
-        model=used_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=temperature,
-        stream=True,
-    )
+    response = await client.chat.completions.create(**kwargs)
 
-    async for chunk in stream:
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta
-        if delta and delta.content:
-            yield delta.content
+    async for chunk in response:
+        if chunk.choices and chunk.choices[0].delta:
+            delta = chunk.choices[0].delta
+            # 正文内容
+            if delta.content:
+                yield {"type": "content", "content": delta.content}
+            # 思维链内容（DeepSeek）
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                yield {"type": "reasoning", "content": delta.reasoning_content}
+            elif hasattr(delta, "reasoning") and delta.reasoning:
+                yield {"type": "reasoning", "content": delta.reasoning}
 
 
 def _parse_json(text: str) -> Optional[dict]:

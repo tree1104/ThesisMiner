@@ -456,6 +456,20 @@ pre,
   z-index: 1;
 }
 
+/* 全局顶栏：承载 API 状态徽章（v7.0 新增） */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-xl);
+  border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
 .page-header {
   padding: var(--space-xl) var(--space-xl) var(--space-lg);
   border-bottom: 1px solid var(--border-subtle);

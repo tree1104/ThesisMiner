@@ -162,10 +162,40 @@ const API = {
   getStatus: () => API.request('/status'),
 
   /* ------------------------------------------------------------------------
+     v7.0 模型管理
+     ------------------------------------------------------------------------ */
+  /** 获取所有模型配置 */
+  getModels: () => API.request('/models'),
+
+  /** 新增模型 */
+  addModel: (model) =>
+    API.request('/models', { method: 'POST', body: JSON.stringify(model) }),
+
+  /** 更新模型 */
+  updateModel: (modelId, model) =>
+    API.request(`/models/${modelId}`, { method: 'PUT', body: JSON.stringify(model) }),
+
+  /** 删除模型 */
+  deleteModel: (modelId) =>
+    API.request(`/models/${modelId}`, { method: 'DELETE' }),
+
+  /** 获取步骤路由配置 */
+  getStepModels: () => API.request('/step-models'),
+
+  /** 更新步骤路由配置 */
+  updateStepModels: (data) =>
+    API.request('/step-models', { method: 'PUT', body: JSON.stringify(data) }),
+
+  /** 切换计价货币 */
+  updateCurrency: (currency) =>
+    API.request('/currency', { method: 'PUT', body: JSON.stringify({ currency }) }),
+
+  /* ------------------------------------------------------------------------
      谱系管理
      ------------------------------------------------------------------------ */
-  /** 获取谱系节点列表 */
-  getLineage: () => API.request('/lineage'),
+  /** 获取谱系节点列表（支持分页） */
+  getLineage: (limit = 20, offset = 0) =>
+    API.request(`/lineage?limit=${limit}&offset=${offset}`),
 
   /** 批量导入谱系节点与边 */
   importLineage: (data) =>
@@ -177,6 +207,10 @@ const API = {
   /** 按关键词检索谱系 */
   searchLineage: (keyword) =>
     API.request(`/lineage/search?keyword=${encodeURIComponent(keyword)}`),
+
+  /** 批量删除谱系节点 */
+  batchDeleteLineage: (nodeIds) =>
+    API.request('/lineage/batch', { method: 'DELETE', body: JSON.stringify({ node_ids: nodeIds }) }),
 
   /** 删除指定谱系节点 */
   deleteLineageNode: (id) =>

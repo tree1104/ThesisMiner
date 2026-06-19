@@ -20,12 +20,35 @@ class CardCreate(BaseModel):
     source: str = ""
 
 
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求。"""
+
+    node_ids: list[str]
+
+
 @router.get("")
-def list_nodes():
-    """列出所有谱系节点。"""
+def list_nodes(limit: int = 20, offset: int = 0):
+    """列出谱系节点，支持分页。
+
+    Args:
+        limit: 每页条数，默认 20
+        offset: 偏移量，默认 0
+    """
     try:
-        nodes = lineage_graph_store.get_all_nodes()
-        return {"nodes": nodes, "count": len(nodes)}
+        all_nodes = lineage_graph_store.get_all_nodes()
+        total = len(all_nodes)
+        # 按创建时间降序排序（最新的在前）
+        all_nodes.sort(key=lambda n: n.get("created_at", ""), reverse=True)
+        # 分页切片
+        paged_nodes = all_nodes[offset : offset + limit]
+        return {
+            "nodes": paged_nodes,
+            "count": len(paged_nodes),
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + limit) < total,
+        }
     except Exception as e:
         return ApiResponse(success=False, error=str(e))
 
@@ -75,6 +98,31 @@ def search_nodes(keyword: str):
     try:
         results = lineage_graph_store.search_nodes(keyword)
         return {"results": results, "count": len(results)}
+    except Exception as e:
+        return ApiResponse(success=False, error=str(e))
+
+
+@router.delete("/batch")
+def batch_delete_nodes(req: BatchDeleteRequest):
+    """批量删除节点及其关联边。
+
+    Args:
+        req: 包含 node_ids 列表的请求体
+    """
+    try:
+        deleted = 0
+        failed = []
+        for node_id in req.node_ids:
+            try:
+                lineage_graph_store.delete_node(node_id)
+                deleted += 1
+            except Exception:
+                failed.append(node_id)
+        return {
+            "deleted": deleted,
+            "failed": failed,
+            "total_requested": len(req.node_ids),
+        }
     except Exception as e:
         return ApiResponse(success=False, error=str(e))
 

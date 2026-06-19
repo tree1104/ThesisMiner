@@ -6,6 +6,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.database import fetch_one
 from backend.models import ApiResponse, SessionCreate
 from backend.sessions import session_manager
 
@@ -30,9 +31,20 @@ async def create_session(req: SessionCreate) -> dict:
 
 @router.get("")
 async def list_sessions(limit: int = 20, offset: int = 0) -> dict:
-    """分页查询会话列表。"""
+    """分页查询会话列表，附带对话轮数统计。"""
     try:
         sessions = session_manager.list_sessions(limit, offset)
+        # 为每个会话统计对话轮数（budget_ledger 中的调用次数）
+        for s in sessions:
+            session_id = s.get("id")
+            if session_id:
+                row = fetch_one(
+                    "SELECT COUNT(*) as cnt FROM budget_ledger WHERE session_id = ?;",
+                    (session_id,),
+                )
+                s["dialog_rounds"] = row["cnt"] if row else 0
+            else:
+                s["dialog_rounds"] = 0
         return {
             "sessions": sessions,
             "count": len(sessions),
@@ -45,11 +57,17 @@ async def list_sessions(limit: int = 20, offset: int = 0) -> dict:
 
 @router.get("/{session_id}")
 async def get_session(session_id: str) -> dict:
-    """获取会话详情。"""
+    """获取会话详情，附带对话轮数统计。"""
     try:
         session = session_manager.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="会话不存在")
+        # 统计对话轮数（budget_ledger 中的调用次数）
+        row = fetch_one(
+            "SELECT COUNT(*) as cnt FROM budget_ledger WHERE session_id = ?;",
+            (session_id,),
+        )
+        session["dialog_rounds"] = row["cnt"] if row else 0
         return session
     except HTTPException:
         raise

@@ -63,8 +63,24 @@ async def get_session_cost(session_id: str) -> dict:
 
 @router.get("/pricing")
 async def get_pricing() -> dict:
-    """获取模型定价表。"""
+    """获取模型定价表（从模型注册表读取）。"""
     try:
-        return estimator.MODEL_PRICING
+        from backend.config import get_settings
+
+        settings = get_settings()
+        # 返回模型注册表中的定价信息
+        pricing = {}
+        for model in settings.models:
+            pricing[model["id"]] = {
+                "label": model.get("label", model["id"]),
+                "input_cny_per_million": model.get("pricing", {}).get("input_cny_per_million", 0),
+                "output_cny_per_million": model.get("pricing", {}).get("output_cny_per_million", 0),
+                "currency": "CNY",
+            }
+        return {
+            "pricing": pricing,
+            "currency": settings.currency,
+            "unit": "元/百万 token" if settings.currency == "CNY" else "USD/百万 token",
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}

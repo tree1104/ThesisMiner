@@ -18,6 +18,14 @@
   // 默认节点类型选项
   const NODE_TYPES = ['paper', 'topic', 'method', 'author', 'concept', 'dataset'];
 
+  // 分页状态
+  let currentPage = 1;
+  const PAGE_SIZE = 20;
+  let totalNodes = 0;
+  let selectedNodeIds = new Set();
+  // 当前页节点数据缓存（用于复选框切换时局部刷新工具栏）
+  let currentPageNodes = [];
+
   /** 取节点类型元信息，未知类型回退到默认 */
   function typeMeta(type) {
     return TYPE_META[type] || { color: '#a8a39a', icon: 'circle', label: type || '节点' };
@@ -26,8 +34,11 @@
   /** 节点列表条目 */
   function nodeItem(node) {
     const meta = typeMeta(node.node_type);
+    const isChecked = selectedNodeIds.has(node.id);
     return (
       '<div class="list-item list-item--clickable" data-node-id="' + escapeHtml(node.id) + '">' +
+      '<input type="checkbox" class="node-checkbox" data-node-id="' + escapeHtml(node.id) + '" ' +
+      (isChecked ? 'checked' : '') + ' style="margin-right:8px;flex-shrink:0" />' +
       '<span class="nav-item__icon" style="color:' + meta.color + ';flex-shrink:0">' +
       '<i data-lucide="' + meta.icon + '"></i></span>' +
       '<div class="flex-1" style="min-width:0">' +
@@ -68,6 +79,42 @@
       '<div class="empty-state__icon" data-lucide="git-fork"></div>' +
       '<div class="empty-state__title">尚未建立谱系</div>' +
       '<p class="empty-state__desc">点击「导入」按钮，添加论文、论题、方法等节点，构建你的学术脉络。</p>' +
+      '</div>'
+    );
+  }
+
+  /** 分页工具栏：全选 / 批量删除 / 页码导航 */
+  function paginationToolbar() {
+    const totalPages = Math.max(1, Math.ceil(totalNodes / PAGE_SIZE));
+    const hasPrev = currentPage > 1;
+    const hasNext = currentPage < totalPages;
+    const selectedCount = selectedNodeIds.size;
+    // 当前页是否全部选中
+    const pageIds = currentPageNodes.map((n) => n.id);
+    const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedNodeIds.has(id));
+    return (
+      '<div class="flex items-center justify-between mb-md" style="gap:12px;flex-wrap:wrap" id="lineage-pagination-toolbar">' +
+      '<div class="flex items-center gap-sm">' +
+      '<label class="flex items-center gap-xs" style="cursor:pointer;font-size:0.8rem">' +
+      '<input type="checkbox" id="select-all-checkbox" ' + (allSelected ? 'checked' : '') + ' />' +
+      '<span>全选</span>' +
+      '</label>' +
+      (selectedCount > 0
+        ? '<button class="btn btn-secondary btn-sm" id="batch-delete-btn">' +
+          '<i data-lucide="trash-2"></i><span>批量删除 (' + selectedCount + ')</span>' +
+          '</button>'
+        : '') +
+      '</div>' +
+      '<div class="flex items-center gap-sm">' +
+      '<button class="btn btn-ghost btn-sm" id="prev-page-btn" ' + (!hasPrev ? 'disabled' : '') + '>' +
+      '<i data-lucide="chevron-left"></i>' +
+      '</button>' +
+      '<span class="text-xs text-muted">第 ' + currentPage + ' 页 / 共 ' + totalPages +
+      ' 页 (' + totalNodes + ' 条)</span>' +
+      '<button class="btn btn-ghost btn-sm" id="next-page-btn" ' + (!hasNext ? 'disabled' : '') + '>' +
+      '<i data-lucide="chevron-right"></i>' +
+      '</button>' +
+      '</div>' +
       '</div>'
     );
   }
@@ -141,6 +188,9 @@
 
     /** 挂载到主内容区：绑定事件并加载数据 */
     async mount(container) {
+      // 重置分页与选中状态
+      currentPage = 1;
+      selectedNodeIds.clear();
       refreshIcons();
       this.bindToolbar(container);
       this.loadNodes();
@@ -174,15 +224,24 @@
       if (!wrap) return;
       try {
         let nodes = [];
+        let isSearch = false;
         if (keyword) {
+          // 搜索模式：不使用分页，展示全部匹配结果
+          isSearch = true;
           const res = await API.searchLineage(keyword);
           nodes = (res && res.results) || [];
+          totalNodes = nodes.length;
         } else {
-          const res = await API.getLineage();
+          // 列表模式：按页大小分页
+          const offset = (currentPage - 1) * PAGE_SIZE;
+          const res = await API.getLineage(PAGE_SIZE, offset);
           nodes = (res && res.nodes) || [];
+          totalNodes = (res && res.total) || 0;
         }
 
-        if (countEl) countEl.textContent = '共 ' + nodes.length + ' 个';
+        currentPageNodes = nodes;
+
+        if (countEl) countEl.textContent = '共 ' + totalNodes + ' 个';
 
         if (!nodes.length) {
           wrap.innerHTML = listEmpty();
@@ -190,20 +249,42 @@
           return;
         }
 
-        wrap.innerHTML = nodes.map((n) => nodeItem(n)).join('');
+        // 渲染分页工具栏（搜索模式下隐藏）+ 节点列表
+        const toolbarHtml = isSearch ? '' : paginationToolbar();
+        wrap.innerHTML = toolbarHtml + nodes.map((n) => nodeItem(n)).join('');
         refreshIcons();
 
-        // 点击节点 -> 在图谱中高亮（弹出详情抽屉）
+        // 绑定分页工具栏事件
+        if (!isSearch) {
+          this.bindPaginationEvents(wrap);
+        }
+
+        // 复选框：阻止冒泡并切换选中状态
+        wrap.querySelectorAll('.node-checkbox').forEach((cb) => {
+          cb.addEventListener('click', (e) => e.stopPropagation());
+          cb.addEventListener('change', () => {
+            const id = cb.dataset.nodeId;
+            if (cb.checked) {
+              selectedNodeIds.add(id);
+            } else {
+              selectedNodeIds.delete(id);
+            }
+            this.refreshToolbar();
+          });
+        });
+
+        // 点击节点 -> 弹出详情抽屉
         wrap.querySelectorAll('[data-node-id]').forEach((el) => {
           el.addEventListener('click', (e) => {
             if (e.target.closest('[data-delete-node]')) return;
+            if (e.target.closest('.node-checkbox')) return;
             const id = el.dataset.nodeId;
             const target = nodes.find((x) => x.id === id);
             if (target) this.showNodeDrawer(target);
           });
         });
 
-        // 删除节点
+        // 单个删除节点
         wrap.querySelectorAll('[data-delete-node]').forEach((btn) => {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -430,6 +511,12 @@
 
     /** 处理搜索 */
     async handleSearch(keyword) {
+      // 清除搜索时回到第一页
+      if (!keyword) {
+        currentPage = 1;
+      }
+      // 搜索时清空选中状态
+      selectedNodeIds.clear();
       await this.loadNodes(keyword);
     },
 
@@ -497,6 +584,8 @@
         try {
           await API.deleteLineageNode(id);
           showToast('节点已删除', 'success');
+          // 从选中集合中移除已删除节点
+          selectedNodeIds.delete(id);
           close();
           // 刷新列表与图谱
           this.positions = {};
@@ -506,6 +595,137 @@
           showToast('删除失败：' + (err.message || err), 'error');
           btn.disabled = false;
           btn.innerHTML = '<i data-lucide="trash-2"></i> 删除';
+          refreshIcons();
+        }
+      });
+    },
+
+    /** 绑定分页工具栏事件（全选 / 批量删除 / 翻页） */
+    bindPaginationEvents(wrap) {
+      if (!wrap) return;
+
+      // 全选复选框：仅选中/取消当前页节点
+      const selectAll = wrap.querySelector('#select-all-checkbox');
+      if (selectAll) {
+        selectAll.addEventListener('click', (e) => e.stopPropagation());
+        selectAll.addEventListener('change', () => {
+          const pageIds = currentPageNodes.map((n) => n.id);
+          if (selectAll.checked) {
+            pageIds.forEach((nid) => selectedNodeIds.add(nid));
+          } else {
+            pageIds.forEach((nid) => selectedNodeIds.delete(nid));
+          }
+          // 同步更新当前页所有节点复选框
+          wrap.querySelectorAll('.node-checkbox').forEach((cb) => {
+            cb.checked = selectedNodeIds.has(cb.dataset.nodeId);
+          });
+          this.refreshToolbar();
+        });
+      }
+
+      // 批量删除按钮
+      const batchBtn = wrap.querySelector('#batch-delete-btn');
+      if (batchBtn) {
+        batchBtn.addEventListener('click', () => {
+          this.confirmBatchDelete();
+        });
+      }
+
+      // 上一页
+      const prevBtn = wrap.querySelector('#prev-page-btn');
+      if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+          if (currentPage > 1) {
+            currentPage--;
+            selectedNodeIds.clear();
+            this.loadNodes();
+          }
+        });
+      }
+
+      // 下一页
+      const nextBtn = wrap.querySelector('#next-page-btn');
+      if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+          const totalPages = Math.max(1, Math.ceil(totalNodes / PAGE_SIZE));
+          if (currentPage < totalPages) {
+            currentPage++;
+            selectedNodeIds.clear();
+            this.loadNodes();
+          }
+        });
+      }
+    },
+
+    /** 局部刷新分页工具栏（复选框切换时调用，避免重渲染整个列表） */
+    refreshToolbar() {
+      const toolbar = document.getElementById('lineage-pagination-toolbar');
+      if (!toolbar) return;
+      toolbar.outerHTML = paginationToolbar();
+      refreshIcons();
+      const wrap = document.getElementById('lineage-list');
+      if (wrap) this.bindPaginationEvents(wrap);
+    },
+
+    /** 批量删除确认 */
+    confirmBatchDelete() {
+      const ids = Array.from(selectedNodeIds);
+      if (!ids.length) return;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'drawer-overlay';
+      const dialog = document.createElement('div');
+      dialog.className = 'drawer';
+      dialog.style.width = 'min(420px, 90vw)';
+      dialog.innerHTML =
+        '<div class="drawer__header"><h3 class="drawer__title">确认批量删除</h3>' +
+        '<button class="drawer__close" data-cancel><i data-lucide="x"></i></button></div>' +
+        '<div class="drawer__body">' +
+        '<div class="flex items-start gap-md">' +
+        '<i data-lucide="alert-triangle" style="width:22px;height:22px;color:var(--warning);flex-shrink:0;margin-top:2px"></i>' +
+        '<p class="text-sm text-secondary">即将删除选中的 ' + ids.length + ' 个节点及其关联的所有关系边，此操作不可撤销。是否继续？</p>' +
+        '</div></div>' +
+        '<div class="drawer__footer">' +
+        '<button class="btn btn-secondary" data-cancel>取消</button>' +
+        '<button class="btn btn-danger" data-confirm><i data-lucide="trash-2"></i> 批量删除</button>' +
+        '</div>';
+      overlay.appendChild(dialog);
+      const container = document.getElementById('drawer-container');
+      if (!container) return;
+      container.appendChild(overlay);
+      refreshIcons(dialog);
+
+      const close = () => {
+        overlay.style.animation = 'fadeIn 200ms reverse forwards';
+        setTimeout(() => overlay.remove(), 200);
+      };
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) close();
+      });
+      dialog.querySelectorAll('[data-cancel]').forEach((b) => b.addEventListener('click', close));
+      dialog.querySelector('[data-confirm]').addEventListener('click', async () => {
+        const btn = dialog.querySelector('[data-confirm]');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> 删除中…';
+        try {
+          const res = await API.batchDeleteLineage(ids);
+          const deleted = (res && res.deleted) || 0;
+          const failed = (res && res.failed) || [];
+          if (failed.length) {
+            showToast('已删除 ' + deleted + ' 个，' + failed.length + ' 个失败', 'warning');
+          } else {
+            showToast('已删除 ' + deleted + ' 个节点', 'success');
+          }
+          selectedNodeIds.clear();
+          close();
+          // 刷新列表与图谱
+          this.positions = {};
+          this.loadNodes();
+          this.loadGraph();
+        } catch (err) {
+          showToast('批量删除失败：' + (err.message || err), 'error');
+          btn.disabled = false;
+          btn.innerHTML = '<i data-lucide="trash-2"></i> 批量删除';
           refreshIcons();
         }
       });

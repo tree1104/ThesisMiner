@@ -473,6 +473,40 @@ function updateAIStatusIndicator(configured) {
   }
 }
 
+/**
+ * 更新全局顶栏 API 状态徽章（v7.0 新增）
+ * 通过 /api/status 检测 AI 是否已配置，同步徽章颜色与文案。
+ * 设置页测试连接后会调用此方法刷新全局徽章。
+ */
+async function updateApiStatus() {
+  const badge = document.getElementById('global-api-status');
+  const text = document.getElementById('api-status-text');
+  if (!badge || !text) return;
+
+  text.textContent = '检测中';
+  badge.className = 'badge badge--default';
+
+  try {
+    const status = await API.getStatus();
+    const configured = !!(status && status.ai_configured);
+    if (configured) {
+      text.textContent = '已配置';
+      badge.className = 'badge badge--success';
+    } else {
+      text.textContent = '未配置';
+      badge.className = 'badge badge--warning';
+    }
+    // 同步侧边栏指示灯与全局状态
+    AppState.aiConfigured = configured;
+    updateAIStatusIndicator(configured);
+  } catch (err) {
+    text.textContent = '连接失败';
+    badge.className = 'badge badge--danger';
+    AppState.aiConfigured = false;
+    updateAIStatusIndicator(false);
+  }
+}
+
 /* --------------------------------------------------------------------------
    10. 侧边栏渲染
    -------------------------------------------------------------------------- */
@@ -515,8 +549,9 @@ async function initApp() {
   updateNavActive(initialPage);
   renderPage(initialPage);
 
-  // 检查 AI 配置状态
+  // 检查 AI 配置状态（侧边栏指示灯 + 全局顶栏徽章）
   await checkAIStatus();
+  updateApiStatus();
 
   // 加载配置缓存
   try {
@@ -552,3 +587,4 @@ window.refreshIcons = refreshIcons;
 window.debounce = debounce;
 window.copyToClipboard = copyToClipboard;
 window.checkAIStatus = checkAIStatus;
+window.updateApiStatus = updateApiStatus;

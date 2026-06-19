@@ -226,6 +226,12 @@
           ? `<span class="badge badge--default" title="缓存命中率">` +
             `<i data-lucide="zap" style="width:12px;height:12px"></i> 缓存 ${Math.round(Number(s.cache_hit_rate) * 100)}%</span>`
           : '';
+      // 对话轮数徽章（v7.0 新增）：基于 budget_ledger 调用次数统计
+      const dialogRoundsBadge =
+        s.dialog_rounds != null
+          ? `<span class="badge badge--default" title="对话轮数">` +
+            `<i data-lucide="message-square" style="width:12px;height:12px"></i> 对话 ${s.dialog_rounds} 轮</span>`
+          : '';
       return `
         <div class="list-item list-item--clickable" data-session-id="${escapeHtml(s.id)}">
           <span class="flex items-center justify-center" style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--accent-primary);flex-shrink:0;">
@@ -237,6 +243,7 @@
               ${degreeBadge(s.degree)}
               ${disciplineBadge(s.discipline)}
               ${cacheBadge}
+              ${dialogRoundsBadge}
             </div>
             <div class="flex items-center gap-md text-xs text-muted flex-wrap">
               <span class="flex items-center gap-xs"><i data-lucide="clock" style="width:12px;height:12px;"></i>${time}</span>
@@ -315,6 +322,14 @@
               <div class="text-sm text-accent">${Math.round(Number(session.cache_hit_rate) * 100)}%</div>
             </div>`
           : '';
+      // 对话轮数信息（v7.0 新增）：基于 budget_ledger 调用次数统计
+      const dialogRoundsInfo =
+        session.dialog_rounds != null
+          ? `<div>
+              <div class="text-xs text-muted mb-xs">对话轮数</div>
+              <div class="text-sm text-accent">${session.dialog_rounds} 轮</div>
+            </div>`
+          : '';
       return `
         <div class="flex flex-col gap-md">
           <div>
@@ -344,6 +359,7 @@
               <div class="text-sm">${escapeHtml(session.mentor_info || '—')}</div>
             </div>
             ${cacheInfo}
+            ${dialogRoundsInfo}
           </div>
           <hr class="divider" />
           <div>
