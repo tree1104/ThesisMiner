@@ -55,7 +55,7 @@ class OrchestrationStateMachine:
         """
         self.ctx = ctx
 
-    def run(self) -> dict:
+    async def run(self) -> dict:
         """编排完整流程。
 
         依次执行：
@@ -89,7 +89,7 @@ class OrchestrationStateMachine:
             # 阶段二：精炼
             self.ctx.current_state = STATE_REASONING
             for candidate in self.ctx.candidates:
-                proposal = self._call_reasoner(candidate)
+                proposal = await self._call_reasoner(candidate)
                 self.ctx.proposals.append(proposal)
 
             # 阶段三：校验
@@ -124,7 +124,7 @@ class OrchestrationStateMachine:
             "errors": self.ctx.errors,
         }
 
-    def _call_reasoner(self, candidate: dict) -> dict:
+    async def _call_reasoner(self, candidate: dict) -> dict:
         """调用精炼器生成提案。
 
         预留接口，实际调用 agents.reasoner_proposal 模块的 generate_proposal；
@@ -144,8 +144,8 @@ class OrchestrationStateMachine:
             return self._fallback_proposal(candidate)
 
         try:
-            # 调用 generate_proposal 生成提案
-            return reasoner_proposal.generate_proposal(
+            # 异步调用 generate_proposal 生成提案
+            return await reasoner_proposal.generate_proposal(
                 degree=self.ctx.degree,
                 discipline=self.ctx.discipline,
                 mentor_info=self.ctx.mentor_info,

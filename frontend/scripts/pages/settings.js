@@ -98,6 +98,28 @@
             </div>
           </div>
 
+          <!-- 文献检索配置卡片（v6.0 新增） -->
+          <div class="card mb-lg">
+            <div class="card__header">
+              <div>
+                <div class="card__title">文献检索配置</div>
+                <div class="card__subtitle">真实检索 / 模拟检索切换</div>
+              </div>
+              <span class="badge badge--default" id="search-status-badge"><span class="badge__dot"></span>检测中</span>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <div class="flex items-center justify-between gap-md">
+                <div style="flex:1;">
+                  <div class="form-label">真实文献检索</div>
+                  <div class="form-hint">开启后将通过 arXiv 与 Semantic Scholar API 检索真实文献，失败时自动降级为模拟检索。</div>
+                </div>
+                <button class="btn btn-secondary" id="cfg-real-search-toggle" type="button">
+                  <i data-lucide="search"></i><span id="search-toggle-label">已关闭</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- 模型定价表 -->
           <div class="card mb-lg">
             <div class="card__header">
@@ -171,7 +193,18 @@
       container.querySelector('#cfg-save')?.addEventListener('click', () => this.save());
       container.querySelector('#cfg-test')?.addEventListener('click', () => this.testConnection());
 
-      await Promise.all([this.loadConfig(), this.loadPricing(), this.refreshStatus()]);
+      // 真实文献检索开关
+      const searchToggle = container.querySelector('#cfg-real-search-toggle');
+      if (searchToggle) {
+        searchToggle.addEventListener('click', () => this.toggleRealSearch());
+      }
+
+      await Promise.all([
+        this.loadConfig(),
+        this.loadPricing(),
+        this.refreshStatus(),
+        this.loadSearchStatus(),
+      ]);
     },
 
     // 加载配置并填充表单与约束常量
@@ -296,6 +329,77 @@
           badge.className = 'badge badge--danger';
           badge.innerHTML = `<span class="badge__dot"></span>检测失败`;
         }
+      }
+    },
+
+    // 加载真实文献检索状态（v6.0 新增）
+    async loadSearchStatus() {
+      const badge = document.getElementById('search-status-badge');
+      try {
+        const status = await API.getSearchStatus();
+        const enabled = !!(status && status.real_search_enabled);
+        this.renderSearchStatus(enabled, status);
+      } catch (err) {
+        if (badge) {
+          badge.className = 'badge badge--danger';
+          badge.innerHTML = `<span class="badge__dot"></span>检测失败`;
+        }
+        const label = document.getElementById('search-toggle-label');
+        if (label) label.textContent = '检测失败';
+      }
+    },
+
+    // 渲染检索状态徽章与按钮样式
+    renderSearchStatus(enabled, status) {
+      const badge = document.getElementById('search-status-badge');
+      const toggleBtn = document.getElementById('cfg-real-search-toggle');
+      const label = document.getElementById('search-toggle-label');
+      const configured = !!(status && status.configured);
+
+      if (badge) {
+        if (enabled) {
+          badge.className = 'badge badge--success';
+          badge.innerHTML = `<span class="badge__dot"></span>${configured ? '已开启' : '已开启·未配置Key'}`;
+        } else {
+          badge.className = 'badge badge--default';
+          badge.innerHTML = `<span class="badge__dot"></span>已关闭`;
+        }
+      }
+      if (toggleBtn) {
+        // 开启时使用 primary 高亮，关闭时使用 secondary
+        toggleBtn.classList.toggle('btn-primary', enabled);
+        toggleBtn.classList.toggle('btn-secondary', !enabled);
+      }
+      if (label) {
+        label.textContent = enabled ? '已开启' : '已关闭';
+      }
+      if (toggleBtn) refreshIcons(toggleBtn);
+    },
+
+    // 切换真实文献检索开关
+    async toggleRealSearch() {
+      const toggleBtn = document.getElementById('cfg-real-search-toggle');
+      const label = document.getElementById('search-toggle-label');
+      // 读取当前状态：依据按钮是否含 btn-primary 判定
+      const currentlyEnabled = toggleBtn ? toggleBtn.classList.contains('btn-primary') : false;
+      const next = !currentlyEnabled;
+
+      if (toggleBtn) {
+        toggleBtn.disabled = true;
+        const original = label ? label.textContent : '';
+        if (label) label.textContent = '切换中…';
+      }
+      try {
+        await API.updateSearchConfig(next);
+        // 切换成功后重新拉取状态以同步徽章
+        await this.loadSearchStatus();
+        showToast(next ? '已开启真实文献检索' : '已关闭真实文献检索', 'success');
+      } catch (err) {
+        showToast(err.message || '切换检索模式失败', 'error');
+        // 回滚 UI
+        this.renderSearchStatus(currentlyEnabled, { configured: true });
+      } finally {
+        if (toggleBtn) toggleBtn.disabled = false;
       }
     },
 

@@ -86,6 +86,68 @@ const API = {
     return data;
   },
 
+  /**
+   * 流式请求方法（支持 SSE / chunked transfer）
+   * @param {string} path - 接口路径（相对 baseUrl）
+   * @param {Object} [options={}] - 请求配置 { method, body, headers }
+   * @param {function(string): void} [onChunk] - 每收到一个文本块的回调
+   * @returns {Promise<string>} 完整的响应文本
+   * @throws {Error} 当网络异常或 HTTP 非 2xx 时抛出
+   */
+  async streamRequest(path, options = {}, onChunk) {
+    const url = `${API.baseUrl}${path}`;
+    const headers = {
+      'Accept': 'text/plain, text/event-stream',
+      ...(options.headers || {}),
+    };
+    if (options.body && typeof options.body === 'object') {
+      headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(options.body);
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API.timeout);
+    options.signal = controller.signal;
+
+    let response;
+    try {
+      response = await fetch(url, { ...options, headers });
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') throw new Error('请求超时');
+      throw new Error(`网络请求失败：${err.message || err}`);
+    }
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      let msg = `请求失败（HTTP ${response.status}）`;
+      try {
+        const errData = await response.json();
+        msg = errData.detail || errData.error || errData.message || msg;
+      } catch (_) {}
+      const error = new Error(msg);
+      error.status = response.status;
+      throw error;
+    }
+
+    // 读取流
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      fullText += chunk;
+      if (typeof onChunk === 'function') {
+        onChunk(chunk);
+      }
+    }
+
+    return fullText;
+  },
+
   /* ------------------------------------------------------------------------
      配置与状态
      ------------------------------------------------------------------------ */
@@ -160,6 +222,19 @@ const API = {
   generateProposals: (data) =>
     API.request('/proposals/generate', { method: 'POST', body: JSON.stringify(data) }),
 
+  /**
+   * 流式生成论题提案（当后端支持流式端点时使用）
+   * @param {object} data - 生成参数
+   * @param {function(string): void} [onChunk] - 文本块回调
+   * @returns {Promise<string>} 完整响应文本
+   */
+  streamGenerateProposals: (data, onChunk) =>
+    API.streamRequest(
+      '/proposals/generate-stream',
+      { method: 'POST', body: data },
+      onChunk,
+    ),
+
   /** 分页查询论题列表 */
   getProposals: (limit = 20, offset = 0, sessionId = null) =>
     API.request(
@@ -172,6 +247,13 @@ const API = {
   /** 删除论题 */
   deleteProposal: (id) =>
     API.request(`/proposals/${id}`, { method: 'DELETE' }),
+
+  /** 生成开题报告 Markdown 文档 */
+  generateReport: (proposalId, useAi = true) =>
+    API.request(`/proposals/${proposalId}/report?use_ai=${useAi}`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
 
   /* ------------------------------------------------------------------------
      约束校验
@@ -187,6 +269,16 @@ const API = {
   /** 文献基线检查 */
   checkLiterature: (data) =>
     API.request('/constraints/check-literature', { method: 'POST', body: JSON.stringify(data) }),
+
+  /** 获取真实文献检索状态（v6.0 新增） */
+  getSearchStatus: () => API.request('/constraints/search-status'),
+
+  /** 更新真实文献检索开关（通过 config 端点持久化） */
+  updateSearchConfig: (enabled) =>
+    API.request('/config', {
+      method: 'POST',
+      body: JSON.stringify({ real_search_enabled: enabled }),
+    }),
 
   /** 获取学术日历 */
   getCalendar: (degree) => API.request(`/constraints/calendar/${degree}`),

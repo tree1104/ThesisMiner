@@ -10,9 +10,11 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from backend.agents import reasoner_proposal
+from backend.agents.proposal_writer import generate_report
 from backend.ai.ai_proxy import check_api_configured
 from backend.database import execute_insert, fetch_all, fetch_one, execute_query
 from backend.models import ApiResponse, ProposalGenerateRequest
+from backend.orchestration.hooks.hard_rule_interceptor import validate_proposal_hard
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
@@ -57,8 +59,8 @@ async def generate_proposals(req: ProposalGenerateRequest) -> dict:
         degree = _enum_to_str(req.degree)
         discipline = _enum_to_str(req.discipline)
 
-        # 调用批量生成
-        proposals = reasoner_proposal.generate_multiple(
+        # 调用批量生成（异步）
+        proposals = await reasoner_proposal.generate_multiple(
             degree=degree,
             discipline=discipline,
             mentor_info=req.mentor_info,
@@ -67,7 +69,19 @@ async def generate_proposals(req: ProposalGenerateRequest) -> dict:
             session_id=req.session_id,
         )
 
-        # 将生成的论题存入数据库
+        # 硬约束拦截：校验每个论题（标题格式 + 时间节点）
+        # 失败即抛出 422，不保存任何论题，强制用户重新生成
+        for i, proposal in enumerate(proposals):
+            try:
+                validate_proposal_hard(proposal, degree)
+            except HTTPException as e:
+                # 附加论题索引信息，便于定位问题论题
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"论题{i + 1}校验失败：{e.detail}（标题：{proposal.get('title', '未知')}）"
+                )
+
+        # 校验通过，将生成的论题存入数据库
         now = datetime.datetime.now().isoformat()
         for proposal in proposals:
             proposal["id"] = uuid.uuid4().hex
@@ -131,6 +145,37 @@ async def get_proposal(proposal_id: str) -> dict:
         return row
     except HTTPException:
         raise
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/{proposal_id}/report")
+async def generate_proposal_report(
+    proposal_id: str, use_ai: bool = True
+) -> dict:
+    """生成开题报告 Markdown 文档。
+
+    基于论题结构化数据，生成符合标准高校模板的开题报告。
+    AI 已配置时使用 AI 增强，否则使用内置模板。
+
+    Args:
+        proposal_id: 论题 ID
+        use_ai: 是否使用 AI 增强（查询参数，默认 True）
+    """
+    try:
+        # 检查论题是否存在
+        proposal = fetch_one(
+            "SELECT id, title FROM proposals WHERE id = ?;", (proposal_id,)
+        )
+        if proposal is None:
+            raise HTTPException(status_code=404, detail="论题不存在")
+
+        result = await generate_report(proposal_id, use_ai=use_ai)
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         return {"success": False, "error": str(e)}
 

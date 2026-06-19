@@ -29,6 +29,8 @@ def get_connection() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
+        # 启用外键约束，确保级联删除生效（每次连接都需要设置）
+        conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
         yield conn
         conn.commit()
@@ -44,6 +46,8 @@ def init_db() -> None:
     _ensure_data_dir()
     with get_connection() as conn:
         cursor = conn.cursor()
+        # 启用外键约束，确保级联删除生效（每次连接都需要设置）
+        cursor.execute("PRAGMA foreign_keys = ON;")
 
         # 会话表
         cursor.execute(
@@ -57,7 +61,10 @@ def init_db() -> None:
                 status TEXT,
                 created_at TEXT,
                 updated_at TEXT,
-                context TEXT
+                context TEXT,
+                cache_prefix_hash TEXT,
+                cache_id TEXT,
+                cache_hit_rate REAL
             );
             """
         )
@@ -79,7 +86,7 @@ def init_db() -> None:
                 confidence_score REAL,
                 auto_rewritten INTEGER,
                 created_at TEXT,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             """
         )
@@ -126,7 +133,8 @@ def init_db() -> None:
                 total_tokens INTEGER,
                 cost REAL,
                 purpose TEXT,
-                created_at TEXT
+                created_at TEXT,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             """
         )
@@ -144,6 +152,36 @@ def init_db() -> None:
             );
             """
         )
+
+        conn.commit()
+
+    # 处理已存在数据库的表结构升级（新增字段等）
+    migrate_db()
+
+
+def migrate_db() -> None:
+    """数据库迁移：为已存在的数据库补充新增字段。
+
+    SQLite 不支持在 CREATE TABLE IF NOT EXISTS 时为已存在的表添加列，
+    因此需要通过 ALTER TABLE 显式补齐 sessions 表的缓存相关字段。
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # 查询 sessions 表现有的列名
+        cursor.execute("PRAGMA table_info(sessions);")
+        existing_columns = {row["name"] for row in cursor.fetchall()}
+
+        # 缺失则补齐 cache_prefix_hash 列
+        if "cache_prefix_hash" not in existing_columns:
+            cursor.execute(
+                "ALTER TABLE sessions ADD COLUMN cache_prefix_hash TEXT;"
+            )
+        # 缺失则补齐 cache_id 列
+        if "cache_id" not in existing_columns:
+            cursor.execute("ALTER TABLE sessions ADD COLUMN cache_id TEXT;")
+        # 缺失则补齐 cache_hit_rate 列
+        if "cache_hit_rate" not in existing_columns:
+            cursor.execute("ALTER TABLE sessions ADD COLUMN cache_hit_rate REAL;")
 
         conn.commit()
 

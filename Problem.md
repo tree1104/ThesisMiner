@@ -162,3 +162,94 @@
 
 ### 5. 21 项接口自测全部通过
 - **说明**：后端 API 层覆盖 21 项接口测试，包含正常流程（论题生成、列表查询、详情获取、删除、预算汇总、配置读写、状态检查）与异常场景（AI 未配置返回 400、论题不存在返回 404、单个生成失败回退兜底、JSON 解析失败容错、可行性拦截抛异常），全部通过；前端经全量审查无 XSS、路由、生命周期、数据解析等问题。
+
+### 6. 28 项接口自测全部通过（增强版）
+- **说明**：在原 21 项基础上新增 7 项测试覆盖级联删除、检索状态、模拟检索、硬约束拦截、开题报告模板、404场景、缓存字段，全部通过
+
+---
+
+## 四、增强版新增问题与解决
+
+### 11. 会话级联删除缺失
+- **问题描述**：`delete_session` 仅删除 `sessions` 表，`proposals` 和 `budget_ledger` 成为孤儿数据，长期累积导致存储泄漏与查询脏数据。
+- **解决思路**：
+  1. 在 `delete_session` 中使用事务显式删除 `proposals`、`budget_ledger`、`sessions` 三张表的关联记录，保证原子性。
+  2. 启用 `PRAGMA foreign_keys = ON`，让 SQLite 强制外键约束生效。
+  3. 为 `proposals`、`budget_ledger` 表添加 `ON DELETE CASCADE` 外键约束，从机制上杜绝孤儿数据。
+  4. `sessions` 表扩展 `cache_prefix_hash`、`cache_id`、`cache_hit_rate` 列，支撑 Prompt 缓存命中率统计。
+- **涉及文件**：`backend/database.py`、`backend/sessions/session_manager.py`
+
+### 12. AI 调用同步阻塞
+- **问题描述**：`openai.OpenAI` 同步客户端阻塞 FastAPI 事件循环，高并发时服务假死，单次 LLM 调用（数秒级）会拖慢所有在途请求。
+- **解决思路**：
+  1. 将 `openai.OpenAI` 替换为 `openai.AsyncOpenAI`，`call_llm` / `call_llm_json` / `call_llm_stream` 全部改为 `async def`。
+  2. 所有调用方（`reasoner_proposal`、`mentor_agent`、`state_machine`、`proposal_writer`）改为 `await` 调用，整条链路异步化。
+  3. 模块级 `_client` 缓存避免每次调用重复创建客户端，减少连接开销。
+  4. 路由层 `async def` 与异步 AI 调用协同，单 worker 即可承载更高并发。
+- **涉及文件**：`backend/ai/ai_proxy.py`、`backend/agents/reasoner_proposal.py`、`backend/agents/mentor_agent.py`、`backend/orchestration/state_machine.py`
+
+### 13. JSON 解析容错不足
+- **问题描述**：模型返回尾随逗号、单引号、注释等非标准 JSON 时，`json.loads` 直接抛 `JSONDecodeError`，导致论题生成流程中断。
+- **解决思路**：
+  1. 引入 `json5` 依赖，`_parse_json` 使用 `json5.loads` 支持宽松语法（尾随逗号、单引号、注释）。
+  2. 三级容错策略：直接 `json5.loads` → 代码块提取（` ```json ... ``` `）→ 首尾大括号子串提取。
+  3. `call_llm_json` 在解析失败时自动重试一次，并附加 `response_format={"type": "json_object"}` 强制模型输出标准 JSON。
+  4. 重试仍失败则抛出异常，由上层兜底机制（`fallback_proposal`）接管。
+- **涉及文件**：`requirements.txt`、`backend/ai/ai_proxy.py`
+
+### 14. 文献检索为纯模拟数据
+- **问题描述**：`searcher_wrapper` 全部返回模拟文献，无法验证真实新颖性，文献基线校验形同虚设。
+- **解决思路**：
+  1. 实现 `MockSearcher` / `RealSearcher` 工厂模式，`get_searcher()` 根据配置 `real_search_enabled` 返回对应实例。
+  2. `RealSearcher` 使用 `httpx.AsyncClient` 异步请求 arXiv + Semantic Scholar API，支持按关键词与学科检索。
+  3. 5 秒超时自动降级：真实检索超时或失败时回退到 `MockSearcher`，并在响应中附加 `search_degraded=true` 标记。
+  4. 新增 `POST /api/constraints/search-literature`（执行检索）与 `GET /api/constraints/search-status`（查询配置状态）端点。
+  5. 前端设置页增加「文献检索配置」卡片与真实检索开关按钮。
+- **涉及文件**：`backend/config.py`、`backend/agents/searcher_wrapper.py`、`backend/routes/constraints.py`
+
+### 15. Prompt 前缀不稳定导致缓存命中率低
+- **问题描述**：多轮对话时历史拼接导致 Prompt 前缀变化，KV Cache 无法命中，每次调用都重新计算前缀 token，成本与延迟双高。
+- **解决思路**：
+  1. 三段式重构——`build_immutable_base`（系统角色 + 硬约束）+ `build_immutable_profile`（学位 + 学科 + 导师）+ `build_dynamic_tail`（当前查询 + DST 状态）。
+  2. `compute_prefix_hash(base, profile)` 生成 SHA-256 16 字符哈希作为缓存标识，写入 `sessions.cache_prefix_hash`。
+  3. `call_llm` 接受可选 `prefix_hash` 参数，注入 `cache_control` 参数到请求，提示服务商复用 KV Cache。
+  4. `cache_hit_rate` 字段统计会话级缓存命中率，前端会话卡片展示。
+- **涉及文件**：`backend/ai/prompts.py`、`backend/ai/ai_proxy.py`
+
+### 16. 多轮对话上下文膨胀
+- **问题描述**：历史对话全量拼接导致 token 用量线性增长，第 10 轮的 Prompt 长度可达首轮的 5 倍，成本失控且超出模型上下文窗口。
+- **解决思路**：
+  1. 引入 DST 对话状态追踪器，`extract_state` 提取结构化状态槽（`selected_topic` / `confirmed_methods` / `confirmed_discipline` / `open_questions` / `iteration_count`）。
+  2. `compact_history` 将超过 5 轮的历史压缩为 DST 摘要 + 最近 2 轮原文，token 用量从 O(n) 降为 O(1)。
+  3. `update_session_context_with_dst` 集成到会话管理，每次上下文更新自动触发压缩。
+  4. 压缩后的 DST 状态作为 `build_dynamic_tail` 的输入，与三段式 Prompt 协同保证前缀稳定。
+- **涉及文件**：`backend/sessions/dialogue_state_tracker.py`、`backend/sessions/dst_compactor.py`、`backend/sessions/session_manager.py`
+
+### 17. 软校验无法阻止不合规论题落库
+- **问题描述**：`format_validator` 返回 dict 但不抛异常，不合规论题仍被保存到 `proposals` 表，后续清理成本高且可能误导用户。
+- **解决思路**：
+  1. 新增 `hard_rule_interceptor.py`，`validate_title_hard` / `validate_timeline_hard` 不合规时抛 HTTP 422（`HTTPException`）。
+  2. `_extract_total_months` 从 `research_content` 解析「X 个月 / X 年 / 半年 / X 周」等表述，统一换算为月数。
+  3. 集成到 `/api/proposals/generate` 端点，fail-fast 策略——任一论题校验失败立即返回 422，不保存任何论题。
+  4. 与原 `format_validator` 软校验并存：软校验负责自动重写（可恢复），硬约束负责拦截（不可恢复），分层治理。
+- **涉及文件**：`backend/orchestration/hooks/hard_rule_interceptor.py`、`backend/routes/proposals.py`
+
+### 18. 缺少开题报告直出能力
+- **问题描述**：论题生成后需手动拼装开题报告，无法一键生成，用户需在多个工具间复制粘贴，体验断裂。
+- **解决思路**：
+  1. 新增 `proposal_writer.py`，`generate_report(proposal_id, use_ai)` 支持 AI 增强 + 模板兜底双模式。
+  2. 内置 6 章节标准模板（基本信息 / 选题依据 / 国内外研究现状 / 研究内容 / 技术路线与可行性分析 / 进度安排），覆盖研究生院开题报告核心模块。
+  3. AI 增强模式调用 `call_llm` 基于论题数据生成更丰富内容，失败时自动回退模板模式。
+  4. 新增 `POST /api/proposals/{id}/report?use_ai=true|false` 端点，返回 Markdown 全文。
+  5. 前端论题详情抽屉增加「生成开题报告」按钮与报告抽屉（支持复制 / 下载）。
+- **涉及文件**：`backend/agents/proposal_writer.py`、`backend/routes/proposals.py`、`frontend/scripts/api.js`、`frontend/scripts/pages/generate.js`
+
+### 19. 前端缺少流式读取与缓存优化
+- **问题描述**：论题生成无进度反馈（用户面对空白等待），会话列表每次全量请求（无缓存），交互体验差且服务端压力高。
+- **解决思路**：
+  1. `api.js` 新增 `streamRequest` 流式读取方法（`fetch` + `ReadableStream`），支持逐 chunk 回调。
+  2. `generate.js` 实现打字机加载动画（5 条循环文案 + 步骤徽章），通过 `streamGenerateProposals` 流式接收进度。
+  3. `sessions.js` 使用 `sessionStorage` 缓存会话列表（30 秒 TTL），减少全量请求；展示 `cache_hit_rate` 缓存命中率徽章。
+  4. `settings.js` 增加「文献检索配置」卡片与真实检索开关按钮。
+  5. 新增 API 方法：`getSearchStatus`、`updateSearchConfig`、`streamGenerateProposals`。
+- **涉及文件**：`frontend/scripts/api.js`、`frontend/scripts/pages/generate.js`、`frontend/scripts/pages/settings.js`、`frontend/scripts/pages/sessions.js`

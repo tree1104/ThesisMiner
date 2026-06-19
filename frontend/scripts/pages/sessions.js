@@ -21,6 +21,10 @@
     closed: { cls: 'badge--default', label: '已关闭' },
   };
 
+  // sessionStorage 缓存键与 TTL（v6.0 新增）：用于会话列表首屏加速
+  const SESSIONS_CACHE_KEY = 'thesisminer_sessions_cache';
+  const SESSIONS_CACHE_TTL = 30000; // 30 秒
+
   // 生成状态徽章 HTML
   function statusBadge(status) {
     const cfg = STATUS_BADGE[status] || { cls: 'badge--default', label: status || '未知' };
@@ -115,49 +119,100 @@
       await this.loadSessions();
     },
 
-    // 加载会话列表
+    // 加载会话列表：优先使用 sessionStorage 缓存加速首屏，后台静默刷新
     async loadSessions() {
+      const listEl = document.getElementById('sessions-list');
+      if (!listEl) return;
+
+      // 尝试从 sessionStorage 读取缓存以即时渲染
+      let usedCache = false;
+      try {
+        const cached = sessionStorage.getItem(SESSIONS_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          const cachedData = parsed && parsed.data;
+          const timestamp = parsed && parsed.timestamp;
+          if (cachedData && timestamp && Date.now() - timestamp < SESSIONS_CACHE_TTL) {
+            // 缓存未过期：立即渲染并后台刷新
+            this.renderSessions(cachedData.sessions || []);
+            usedCache = true;
+            // 后台静默刷新以同步最新数据
+            this.refreshSessionsInBackground(true);
+            return;
+          }
+          // 缓存已过期：先用旧数据渲染骨架，再后台刷新
+          this.renderSessions(cachedData.sessions || []);
+          usedCache = true;
+        }
+      } catch (_) {
+        // 缓存解析失败，忽略并走正常流程
+      }
+
+      if (!usedCache) {
+        // 无缓存：展示骨架屏并直接拉取
+        listEl.innerHTML = skeletonList();
+        refreshIcons(listEl);
+      }
+      await this.refreshSessionsInBackground(!usedCache);
+    },
+
+    // 后台静默刷新会话列表并写入 sessionStorage
+    // silent=true 时不展示骨架屏，仅替换列表内容
+    async refreshSessionsInBackground(silent = false) {
+      const listEl = document.getElementById('sessions-list');
+      if (!listEl) return;
+      try {
+        const data = await API.getSessions(20, 0);
+        // 写入 sessionStorage 缓存（失败时静默忽略）
+        try {
+          sessionStorage.setItem(
+            SESSIONS_CACHE_KEY,
+            JSON.stringify({ data: data, timestamp: Date.now() }),
+          );
+        } catch (_) {}
+        this.renderSessions((data && data.sessions) || []);
+      } catch (err) {
+        // 静默刷新失败：仅当列表为空时展示错误态，避免覆盖已有缓存渲染
+        if (!silent || !listEl.children.length) {
+          listEl.innerHTML = this.errorState(err);
+          refreshIcons(listEl);
+        }
+        showToast(err.message || '加载会话失败', 'error');
+      }
+    },
+
+    // 渲染会话列表到 DOM（含统计指标与事件绑定）
+    renderSessions(sessions) {
       const listEl = document.getElementById('sessions-list');
       const totalEl = document.getElementById('stat-total');
       const activeEl = document.getElementById('stat-active');
       if (!listEl) return;
 
-      listEl.innerHTML = skeletonList();
-      refreshIcons(listEl);
+      const total = sessions.length;
+      const active = sessions.filter((s) => s.status === 'active').length;
+      if (totalEl) totalEl.textContent = String(total);
+      if (activeEl) activeEl.textContent = String(active);
 
-      try {
-        const data = await API.getSessions(20, 0);
-        const sessions = (data && data.sessions) || [];
-        const total = sessions.length;
-        const active = sessions.filter((s) => s.status === 'active').length;
-        if (totalEl) totalEl.textContent = String(total);
-        if (activeEl) activeEl.textContent = String(active);
-
-        if (sessions.length === 0) {
-          listEl.innerHTML = this.emptyState();
-          refreshIcons(listEl);
-          // 绑定空状态引导按钮
-          const gotoBtn = listEl.querySelector('#empty-goto-generate');
-          if (gotoBtn) gotoBtn.addEventListener('click', () => navigate('generate'));
-          return;
-        }
-
-        listEl.innerHTML = sessions.map((s) => this.sessionCard(s)).join('');
-        // 绑定行内事件
-        listEl.querySelectorAll('[data-session-id]').forEach((el) => {
-          const id = el.dataset.sessionId;
-          const viewBtn = el.querySelector('[data-action="view"]');
-          const delBtn = el.querySelector('[data-action="delete"]');
-          if (viewBtn) viewBtn.addEventListener('click', (e) => { e.stopPropagation(); this.showDetail(id); });
-          if (delBtn) delBtn.addEventListener('click', (e) => { e.stopPropagation(); this.confirmDelete(id); });
-          el.addEventListener('click', () => this.showDetail(id));
-        });
+      if (sessions.length === 0) {
+        listEl.innerHTML = this.emptyState();
         refreshIcons(listEl);
-      } catch (err) {
-        listEl.innerHTML = this.errorState(err);
-        refreshIcons(listEl);
-        showToast(err.message || '加载会话失败', 'error');
+        // 绑定空状态引导按钮
+        const gotoBtn = listEl.querySelector('#empty-goto-generate');
+        if (gotoBtn) gotoBtn.addEventListener('click', () => navigate('generate'));
+        return;
       }
+
+      listEl.innerHTML = sessions.map((s) => this.sessionCard(s)).join('');
+      // 绑定行内事件
+      listEl.querySelectorAll('[data-session-id]').forEach((el) => {
+        const id = el.dataset.sessionId;
+        const viewBtn = el.querySelector('[data-action="view"]');
+        const delBtn = el.querySelector('[data-action="delete"]');
+        if (viewBtn) viewBtn.addEventListener('click', (e) => { e.stopPropagation(); this.showDetail(id); });
+        if (delBtn) delBtn.addEventListener('click', (e) => { e.stopPropagation(); this.confirmDelete(id); });
+        el.addEventListener('click', () => this.showDetail(id));
+      });
+      refreshIcons(listEl);
     },
 
     // 单条会话卡片
@@ -165,6 +220,12 @@
       const title = escapeHtml(s.title || '未命名会话');
       const time = formatDate(s.created_at);
       const shortId = escapeHtml((s.id || '').slice(0, 8));
+      // 缓存命中率徽章（v6.0 新增）：仅当后端返回非空值时展示
+      const cacheBadge =
+        s.cache_hit_rate != null && s.cache_hit_rate !== ''
+          ? `<span class="badge badge--default" title="缓存命中率">` +
+            `<i data-lucide="zap" style="width:12px;height:12px"></i> 缓存 ${Math.round(Number(s.cache_hit_rate) * 100)}%</span>`
+          : '';
       return `
         <div class="list-item list-item--clickable" data-session-id="${escapeHtml(s.id)}">
           <span class="flex items-center justify-center" style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--accent-primary);flex-shrink:0;">
@@ -175,6 +236,7 @@
               <span class="text-display font-semibold" style="color:var(--text-primary);font-size:0.95rem;">${title}</span>
               ${degreeBadge(s.degree)}
               ${disciplineBadge(s.discipline)}
+              ${cacheBadge}
             </div>
             <div class="flex items-center gap-md text-xs text-muted flex-wrap">
               <span class="flex items-center gap-xs"><i data-lucide="clock" style="width:12px;height:12px;"></i>${time}</span>
@@ -245,6 +307,14 @@
 
     // 详情抽屉主体 HTML
     detailBodyHtml(session, proposals) {
+      // 缓存命中率信息（v6.0 新增）：仅当后端返回非空值时展示
+      const cacheInfo =
+        session.cache_hit_rate != null && session.cache_hit_rate !== ''
+          ? `<div>
+              <div class="text-xs text-muted mb-xs">缓存命中率</div>
+              <div class="text-sm text-accent">${Math.round(Number(session.cache_hit_rate) * 100)}%</div>
+            </div>`
+          : '';
       return `
         <div class="flex flex-col gap-md">
           <div>
@@ -273,6 +343,7 @@
               <div class="text-xs text-muted mb-xs">导师信息</div>
               <div class="text-sm">${escapeHtml(session.mentor_info || '—')}</div>
             </div>
+            ${cacheInfo}
           </div>
           <hr class="divider" />
           <div>
@@ -341,6 +412,8 @@
             confirmBtn.disabled = true;
             try {
               await API.deleteSession(sessionId);
+              // 删除成功后清除 sessionStorage 缓存，避免下次渲染仍展示已删除会话
+              try { sessionStorage.removeItem(SESSIONS_CACHE_KEY); } catch (_) {}
               closeDrawer();
               showToast('会话已删除', 'success');
               this.loadSessions();

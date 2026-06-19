@@ -7,8 +7,16 @@ import datetime
 import json
 import uuid
 
-from backend.database import execute_insert, fetch_all, fetch_one, execute_query
+from backend.database import (
+    execute_insert,
+    fetch_all,
+    fetch_one,
+    execute_query,
+    get_connection,
+)
 from backend.models import SessionCreate, SessionResponse
+from backend.sessions.dialogue_state_tracker import extract_state
+from backend.sessions.dst_compactor import compact_history
 
 
 def create_session(req: SessionCreate) -> dict:
@@ -121,19 +129,116 @@ def update_session_context(session_id: str, context: dict) -> int:
     )
 
 
-def delete_session(session_id: str) -> int:
-    """删除会话。
+def update_session_context_with_dst(session_id: str, context: dict) -> int:
+    """使用 DST 压缩更新会话上下文。
 
-    注意：此处仅删除 sessions 表中的记录，关联的 proposals 表数据
-    不会在此函数中清理（简单实现）。
+    流程：
+        1. 从 context 的 history 中提取 DST 状态槽（extract_state）。
+        2. 调用 compact_history 将早期历史压缩为 DST 状态摘要消息。
+        3. 将压缩后的 history 与 dst_state 写回 context。
+        4. 调用 update_session_context 持久化。
+
+    保留原始 update_session_context 与 compress_context 用于向后兼容。
+
+    Args:
+        session_id: 会话唯一标识。
+        context: 原始上下文字典，应包含 history 列表。
+
+    Returns:
+        受影响的行数。
+    """
+    if not isinstance(context, dict):
+        # 非字典类型直接走原逻辑
+        return update_session_context(session_id, context)
+
+    # 复制一份避免原地修改影响调用方
+    new_context = dict(context)
+    history = new_context.get("history", [])
+    if not isinstance(history, list):
+        history = []
+
+    # 1. 提取 DST 状态槽
+    dst_state = extract_state(history)
+
+    # 2. 压缩历史为 DST 状态摘要 + 最近 2 轮原始对话
+    compressed_history = compact_history(history, dst_state)
+
+    # 3. 写回 context
+    new_context["history"] = compressed_history
+    new_context["dst_state"] = dst_state
+
+    # 4. 持久化
+    return update_session_context(session_id, new_context)
+
+
+def delete_session(session_id: str) -> int:
+    """删除会话及其关联的论题和预算记录（级联清理）。
+
+    使用事务显式删除关联数据，即使外键级联未生效也能正确清理。
 
     Args:
         session_id: 会话唯一标识。
 
     Returns:
+        受影响的行数（sessions 表删除的行数）。
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON;")
+        # 显式删除关联数据（确保即使外键约束未生效也能清理）
+        cursor.execute("DELETE FROM proposals WHERE session_id = ?;", (session_id,))
+        cursor.execute("DELETE FROM budget_ledger WHERE session_id = ?;", (session_id,))
+        cursor.execute("DELETE FROM sessions WHERE id = ?;", (session_id,))
+        return cursor.rowcount
+
+
+def update_cache_info(
+    session_id: str, prefix_hash: str, cache_id: str, hit_rate: float
+) -> int:
+    """更新会话的缓存信息。
+
+    将缓存前缀哈希、缓存 ID 与缓存命中率写入 sessions 表对应记录，
+    同时刷新 updated_at 时间戳。
+
+    Args:
+        session_id: 会话唯一标识。
+        prefix_hash: 缓存前缀哈希值。
+        cache_id: 缓存唯一标识。
+        hit_rate: 缓存命中率（取值范围 0-1）。
+
+    Returns:
         受影响的行数。
     """
-    return execute_query("DELETE FROM sessions WHERE id = ?;", (session_id,))
+    now = datetime.datetime.now().isoformat()
+    return execute_query(
+        "UPDATE sessions SET cache_prefix_hash = ?, cache_id = ?, "
+        "cache_hit_rate = ?, updated_at = ? WHERE id = ?;",
+        (prefix_hash, cache_id, hit_rate, now, session_id),
+    )
+
+
+def get_cache_info(session_id: str) -> dict | None:
+    """获取会话的缓存信息。
+
+    Args:
+        session_id: 会话唯一标识。
+
+    Returns:
+        包含 cache_prefix_hash、cache_id、cache_hit_rate 三个字段的字典；
+        若会话不存在则返回 None。
+    """
+    row = fetch_one(
+        "SELECT cache_prefix_hash, cache_id, cache_hit_rate "
+        "FROM sessions WHERE id = ?;",
+        (session_id,),
+    )
+    if row is None:
+        return None
+    return {
+        "cache_prefix_hash": row.get("cache_prefix_hash"),
+        "cache_id": row.get("cache_id"),
+        "cache_hit_rate": row.get("cache_hit_rate"),
+    }
 
 
 def compress_context(context: dict, max_history: int = 10) -> dict:

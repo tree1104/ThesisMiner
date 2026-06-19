@@ -5,7 +5,7 @@
 """
 
 
-def review_proposal(proposal: dict, degree: str = "master", session_id: str = None) -> dict:
+async def review_proposal(proposal: dict, degree: str = "master", session_id: str = None) -> dict:
     """从导师视角评审单个论题提案。
 
     流程：检查 API 配置 → 构建评审提示 → 调用 LLM → 整理评审结果。
@@ -40,8 +40,8 @@ def review_proposal(proposal: dict, degree: str = "master", session_id: str = No
     # 根据学位选择模型
     model = get_model_for_degree(degree)
 
-    # 调用 LLM 获取评审结果
-    result = call_llm_json(
+    # 异步调用 LLM 获取评审结果
+    result = await call_llm_json(
         system_prompt=MENTOR_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         model=model,
@@ -82,7 +82,7 @@ def _normalize_review(review: dict) -> dict:
     }
 
 
-def batch_review(proposals: list[dict], degree: str = "master", session_id: str = None) -> list[dict]:
+async def batch_review(proposals: list[dict], degree: str = "master", session_id: str = None) -> list[dict]:
     """批量评审多个论题提案。
 
     对每个提案调用 review_proposal，单个失败时回退到 fallback_review。
@@ -98,7 +98,8 @@ def batch_review(proposals: list[dict], degree: str = "master", session_id: str 
     results = []
     for proposal in proposals:
         try:
-            review = review_proposal(proposal, degree=degree, session_id=session_id)
+            # 异步调用单个评审
+            review = await review_proposal(proposal, degree=degree, session_id=session_id)
             results.append(review)
         except Exception:
             # 单个评审失败时使用兜底方案，确保系统可用

@@ -5,7 +5,7 @@
 """
 
 
-def generate_proposal(
+async def generate_proposal(
     degree: str,
     discipline: str,
     mentor_info: str,
@@ -60,8 +60,8 @@ def generate_proposal(
     # 根据学位选择模型
     model = get_model_for_degree(degree)
 
-    # 调用 LLM 获取结构化响应
-    result = call_llm_json(
+    # 异步调用 LLM 获取结构化响应
+    result = await call_llm_json(
         system_prompt=REASONER_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         model=model,
@@ -165,7 +165,7 @@ def _ensure_proposal_fields(
     return proposal
 
 
-def generate_multiple(
+async def generate_multiple(
     degree: str,
     discipline: str,
     mentor_info: str,
@@ -198,7 +198,8 @@ def generate_multiple(
     proposals = []
     for candidate in candidates:
         try:
-            proposal = generate_proposal(
+            # 异步调用单个提案生成
+            proposal = await generate_proposal(
                 degree=degree,
                 discipline=discipline,
                 mentor_info=mentor_info,

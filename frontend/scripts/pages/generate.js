@@ -114,6 +114,62 @@
     );
   }
 
+  /**
+   * 生成中状态（带打字机/进度动画）
+   * 返回 HTML 字符串与启动/清理函数；后端 /generate 仍返回 JSON，
+   * 此处通过循环切换文案模拟流式进度，提升等待体验。
+   */
+  function loadingResultAnimated() {
+    const messages = [
+      '正在分析学术语境...',
+      '检索相关文献...',
+      '生成候选论题...',
+      '校验学术规范...',
+      '优化论题表述...',
+    ];
+    const steps = ['分析', '检索', '生成', '校验'];
+    const html =
+      '<div class="empty-state" id="loading-state">' +
+      '<div class="spinner spinner--lg"></div>' +
+      '<div class="empty-state__title mt-md" id="loading-message">' + messages[0] + '</div>' +
+      '<p class="empty-state__desc">AI 正在结合导师信息与学术规范进行多轮推演，请稍候。</p>' +
+      '<div class="flex gap-xs mt-md" id="loading-dots">' +
+      steps
+        .map(
+          (s, i) =>
+            '<span class="badge badge--default" data-step="' +
+            i +
+            '" style="opacity:0.3;transition:all 0.3s ease;">' +
+            s +
+            '</span>',
+        )
+        .join('') +
+      '</div>' +
+      '</div>';
+    return {
+      html: html,
+      start: function () {
+        let msgIdx = 0;
+        const interval = setInterval(() => {
+          msgIdx = (msgIdx + 1) % messages.length;
+          const msgEl = document.getElementById('loading-message');
+          const dots = document.querySelectorAll('#loading-dots .badge');
+          if (msgEl) msgEl.textContent = messages[msgIdx];
+          if (dots) {
+            dots.forEach((dot, i) => {
+              const active = i <= msgIdx;
+              dot.style.opacity = active ? '1' : '0.3';
+              dot.style.background = active ? 'var(--accent-primary)' : '';
+              dot.style.color = active ? 'var(--bg-base)' : '';
+              dot.style.borderColor = active ? 'var(--accent-primary)' : '';
+            });
+          }
+        }, 1500);
+        return () => clearInterval(interval);
+      },
+    };
+  }
+
   /** AI 未配置提示 */
   function aiUnconfiguredResult() {
     return (
@@ -193,9 +249,145 @@
         ? '<div><h6>可行性分析</h6><p class="text-sm text-secondary">' +
           escapeHtml(p.feasibility_analysis) + '</p></div>'
         : '') +
+      '<div class="flex gap-sm pt-md" style="border-top:1px solid var(--border-subtle)">' +
+      '<button id="gen-report-btn" class="btn btn-primary" style="flex:1"' +
+      (p.id ? '' : ' disabled') + '>' +
+      '<i data-lucide="file-text"></i> 生成开题报告' +
+      '</button>' +
+      '</div>' +
       '</div>';
 
-    showDrawer({ title: '论题详情', bodyHtml: bodyHtml });
+    showDrawer({
+      title: '论题详情',
+      bodyHtml: bodyHtml,
+      onMount: (drawer) => {
+        const btn = drawer.querySelector('#gen-report-btn');
+        if (btn && p.id) {
+          btn.addEventListener('click', () => handleGenerateReport(p));
+        }
+      },
+    });
+  }
+
+  /**
+   * 处理生成开题报告
+   * @param {object} proposal 论题对象
+   */
+  async function handleGenerateReport(proposal) {
+    const proposalId = proposal && proposal.id;
+    if (!proposalId) {
+      showToast('论题 ID 缺失，无法生成报告', 'warning');
+      return;
+    }
+
+    // 关闭论题详情抽屉，打开报告抽屉并展示加载态
+    closeDrawer();
+    showReportDrawer({ loading: true, proposal: proposal });
+
+    try {
+      const res = await API.generateReport(proposalId, true);
+      showReportDrawer({
+        loading: false,
+        proposal: proposal,
+        report: (res && res.report) || '',
+        aiEnhanced: !!(res && res.ai_enhanced),
+        generatedAt: (res && res.generated_at) || '',
+      });
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      showReportDrawer({ loading: false, proposal: proposal, error: msg });
+      showToast('开题报告生成失败：' + msg, 'error');
+    }
+  }
+
+  /**
+   * 在抽屉中展示开题报告 Markdown
+   * @param {object} opts - { loading, proposal, report, aiEnhanced, generatedAt, error }
+   */
+  function showReportDrawer(opts) {
+    const proposal = opts.proposal || {};
+    let bodyHtml;
+
+    if (opts.loading) {
+      bodyHtml =
+        '<div class="empty-state">' +
+        '<div class="spinner spinner--lg"></div>' +
+        '<div class="empty-state__title mt-md">正在生成开题报告…</div>' +
+        '<p class="empty-state__desc">AI 正在基于论题数据扩展为完整报告，请稍候。</p>' +
+        '</div>';
+    } else if (opts.error) {
+      bodyHtml =
+        '<div class="card card--accent" style="border-left-color:var(--danger)">' +
+        '<div class="flex items-start gap-md">' +
+        '<i data-lucide="alert-circle" style="width:22px;height:22px;color:var(--danger);flex-shrink:0;margin-top:2px"></i>' +
+        '<div>' +
+        '<h4 class="text-danger mb-sm">生成失败</h4>' +
+        '<p class="text-sm text-secondary">' + escapeHtml(opts.error) + '</p>' +
+        '</div></div></div>';
+    } else {
+      const report = opts.report || '';
+      const aiBadge = opts.aiEnhanced
+        ? '<span class="badge badge--accent ml-sm">AI 增强</span>'
+        : '<span class="badge badge--default ml-sm">模板生成</span>';
+      const time = opts.generatedAt ? formatDate(opts.generatedAt) : '';
+
+      bodyHtml =
+        '<div class="flex flex-col gap-md">' +
+        '<div>' +
+        '<h3 class="text-display" style="font-size:1.15rem;line-height:1.4">' +
+        escapeHtml(proposal.title || '开题报告') + '</h3>' +
+        '<div class="mt-sm">' +
+        '<span class="badge badge--default">开题报告</span>' + aiBadge +
+        (time ? '<span class="text-xs text-muted ml-sm">' + escapeHtml(time) + '</span>' : '') +
+        '</div>' +
+        '</div>' +
+        '<div class="flex gap-sm">' +
+        '<button id="report-copy-btn" class="btn btn-secondary btn-sm" style="flex:1">' +
+        '<i data-lucide="copy"></i> 复制' +
+        '</button>' +
+        '<button id="report-download-btn" class="btn btn-primary btn-sm" style="flex:1">' +
+        '<i data-lucide="download"></i> 下载' +
+        '</button>' +
+        '</div>' +
+        '<pre class="code-block" id="report-md" style="white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;font-size:0.85rem;line-height:1.6">' +
+        escapeHtml(report) + '</pre>' +
+        '</div>';
+    }
+
+    showDrawer({
+      title: '开题报告',
+      bodyHtml: bodyHtml,
+      onMount: (drawer) => {
+        const copyBtn = drawer.querySelector('#report-copy-btn');
+        const downloadBtn = drawer.querySelector('#report-download-btn');
+        const mdEl = drawer.querySelector('#report-md');
+
+        if (copyBtn && mdEl) {
+          copyBtn.addEventListener('click', async () => {
+            const text = mdEl.textContent || '';
+            const ok = await copyToClipboard(text);
+            showToast(ok ? '已复制到剪贴板' : '复制失败，请手动选择文本', ok ? 'success' : 'error');
+          });
+        }
+
+        if (downloadBtn && mdEl) {
+          downloadBtn.addEventListener('click', () => {
+            const text = mdEl.textContent || '';
+            const safeName = (proposal.title || '开题报告').replace(/[\\/:*?"<>|]/g, '_');
+            const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = safeName + '.md';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast('已开始下载', 'success');
+          });
+        }
+      },
+    });
   }
 
   window.Pages = window.Pages || {};
@@ -409,9 +601,13 @@
         submit.disabled = true;
         submit.innerHTML = '<span class="spinner"></span> 生成中…';
       }
+      // 使用带打字机/进度动画的加载态
+      let stopLoadingAnim = null;
       if (resultEl) {
-        resultEl.innerHTML = loadingResult();
+        const loading = loadingResultAnimated();
+        resultEl.innerHTML = loading.html;
         refreshIcons();
+        stopLoadingAnim = loading.start();
       }
       if (countBadge) countBadge.textContent = '';
 
@@ -441,8 +637,11 @@
         }
 
         if (resultEl) {
+          // 结果到达，先停止加载动画
+          if (stopLoadingAnim) stopLoadingAnim();
+          // 渐显动画：包裹一层 fade-in 容器
           resultEl.innerHTML =
-            '<div class="list stagger">' +
+            '<div class="list stagger fade-in" id="gen-result-list">' +
             proposals.map((p, i) => proposalCard(p, i)).join('') +
             '</div>';
           refreshIcons();
@@ -463,7 +662,7 @@
         const msg = err && err.message ? err.message : String(err);
         if (resultEl) {
           resultEl.innerHTML =
-            '<div class="card card--accent" style="border-left-color:var(--danger)">' +
+            '<div class="card card--accent fade-in" style="border-left-color:var(--danger)">' +
             '<div class="flex items-start gap-md">' +
             '<i data-lucide="alert-circle" style="width:22px;height:22px;color:var(--danger);flex-shrink:0;margin-top:2px"></i>' +
             '<div>' +
@@ -474,6 +673,8 @@
         }
         showToast('论题生成失败：' + msg, 'error');
       } finally {
+        // 兜底清理加载动画
+        if (stopLoadingAnim) stopLoadingAnim();
         state.generating = false;
         if (submit) {
           submit.disabled = false;

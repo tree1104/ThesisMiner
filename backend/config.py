@@ -35,6 +35,11 @@ ACADEMIC_CALENDAR = {
 }
 
 
+def _str_to_bool(value: str) -> bool:
+    """将字符串解析为布尔值，支持 true/1/yes 等常见真值。"""
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
 class Settings:
     """全局配置项。
 
@@ -49,6 +54,16 @@ class Settings:
         self.db_path: str = os.getenv("DB_PATH", "data/thesis_miner.db")
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
         self.flask_env: str = os.getenv("FLASK_ENV", "production")
+
+        # 真实文献检索配置（v6.0 新增）
+        # 默认关闭，需显式开启才调用真实 API
+        self.real_search_enabled: bool = _str_to_bool(
+            os.getenv("REAL_SEARCH_ENABLED", "false")
+        )
+        self.search_api_keys: dict = {
+            "arxiv": os.getenv("SEARCH_API_KEYS_ARXIV", ""),
+            "semantic_scholar": os.getenv("SEARCH_API_KEYS_SEMANTIC_SCHOLAR", ""),
+        }
 
         # 若存在用户配置文件，则覆盖默认值
         self._load_user_config()
@@ -76,6 +91,22 @@ class Settings:
             self.log_level = user_config["log_level"]
         if "flask_env" in user_config:
             self.flask_env = user_config["flask_env"]
+
+        # 真实文献检索配置（v6.0 新增）
+        if "real_search_enabled" in user_config:
+            self.real_search_enabled = bool(user_config["real_search_enabled"])
+        if "search_api_keys" in user_config and isinstance(
+            user_config["search_api_keys"], dict
+        ):
+            # 合并而非整体覆盖，保留默认键结构
+            saved = user_config["search_api_keys"]
+            self.search_api_keys = {
+                "arxiv": saved.get("arxiv", self.search_api_keys.get("arxiv", "")),
+                "semantic_scholar": saved.get(
+                    "semantic_scholar",
+                    self.search_api_keys.get("semantic_scholar", ""),
+                ),
+            }
 
 
 # 单例缓存
