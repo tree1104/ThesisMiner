@@ -1,0 +1,523 @@
+# =============================================================================
+# ThesisMiner v8.0 系统配置文件
+# =============================================================================
+# 本文件定义 ThesisMiner 系统的全局运行参数，包括：
+#   - 应用基础配置（名称/版本/环境/时区）
+#   - 数据库配置（SQLite WAL 模式/连接池/迁移）
+#   - 缓存配置（内存缓存 TTL+LRU/异步缓存/命名空间）
+#   - 日志配置（结构化日志/审计日志/敏感数据脱敏）
+#   - 安全配置（JWT/CSRF/密码哈希/API Key 加密）
+#   - 限流配置（滑动窗口/令牌桶/多级限流）
+#   - 会话配置（上下文管理/版本管理/持久化）
+#   - 编排配置（管道/调度器/执行器）
+#   - SSE 流式配置（背压/水印/超时）
+#
+# 配置优先级：环境变量 > 本文件 > 代码默认值
+# 所有敏感字段（api_key/secret）应通过环境变量注入，此处仅占位
+# =============================================================================
+
+# ===== 应用基础配置 =====
+app:
+  name: "ThesisMiner"
+  version: "8.0.0"
+  description: "AI 驱动的研究生开题全生命周期辅助系统"
+  environment: "production"  # development / staging / production / testing
+  timezone: "Asia/Shanghai"
+  language: "zh-CN"
+  host: "0.0.0.0"
+  port: 5000
+  workers: 4  # Gunicorn 工作进程数
+  debug: false
+  auto_open_browser: true
+
+  # 应用元数据
+  metadata:
+    author: "ThesisMiner Team"
+    license: "MIT"
+    homepage: "https://github.com/thesisminer/thesisminer"
+    docs_url: "https://docs.thesisminer.ai"
+    api_version: "v8"
+    build_id: "20260619"
+
+  # 运行时特性开关
+  features:
+    real_search_enabled: false  # 是否启用真实文献检索 API
+    multi_model_enabled: true   # 是否启用多模型路由
+    streaming_enabled: true     # 是否启用 SSE 流式响应
+    websocket_enabled: true     # 是否启用 WebSocket
+    deep_assist_enabled: true   # 是否启用深度辅助模块
+    plagiarism_check: true      # 是否启用查重
+    auto_save: true             # 是否自动保存会话
+    audit_log: true             # 是否启用审计日志
+
+# ===== 数据库配置 =====
+database:
+  # SQLite 数据库文件路径
+  path: "data/thesis_miner.db"
+
+  # 连接池配置
+  pool:
+    max_connections: 20
+    min_connections: 5
+    max_idle_time: 300  # 空闲连接最大存活时间（秒）
+    connection_timeout: 30  # 获取连接超时（秒）
+
+  # SQLite 特定配置
+  sqlite:
+    journal_mode: "WAL"  # WAL 模式提升并发读写性能
+    synchronous: "NORMAL"  # NORMAL 在 WAL 下足够安全且更快
+    cache_size: -64000  # 缓存大小（KB，负数表示字节）
+    temp_store: "MEMORY"  # 临时表存储在内存
+    mmap_size: 268435456  # 内存映射大小（256MB）
+    foreign_keys: true  # 启用外键约束
+    busy_timeout: 5000  # 忙等待超时（毫秒）
+
+  # 迁移配置
+  migration:
+    auto_migrate: true  # 启动时自动执行迁移
+    backup_before_migrate: true  # 迁移前备份
+    migration_dir: "migrations"
+
+  # 数据保留策略
+  retention:
+    session_retention_days: 90  # 会话保留天数
+    log_retention_days: 30  # 日志保留天数
+    audit_retention_days: 365  # 审计日志保留天数
+    cleanup_interval: 3600  # 清理间隔（秒）
+
+# ===== 缓存配置 =====
+cache:
+  # 内存缓存配置
+  memory:
+    max_size: 1000  # 最大缓存条目数
+    default_ttl: 300  # 默认 TTL（秒）
+    cleanup_interval: 60  # 清理间隔（秒）
+    enable_stats: true  # 启用统计
+
+  # LRU 淘汰策略
+  lru:
+    enabled: true
+    eviction_policy: "lru"  # lru / lfu / fifo
+    max_memory_mb: 100  # 最大内存占用（MB）
+
+  # 异步缓存配置
+  async_cache:
+    enabled: true
+    lock_timeout: 10  # 锁超时（秒）
+    refresh_ahead: 0.8  # 提前刷新比例（TTL 的 80% 时刷新）
+
+  # 多命名空间缓存
+  namespaces:
+    - name: "search_results"
+      ttl: 600
+      max_size: 500
+    - name: "model_responses"
+      ttl: 1800
+      max_size: 200
+    - name: "validation_results"
+      ttl: 3600
+      max_size: 1000
+    - name: "user_sessions"
+      ttl: 1800
+      max_size: 5000
+    - name: "literature_cache"
+      ttl: 7200
+      max_size: 300
+    - name: "rule_results"
+      ttl: 3600
+      max_size: 2000
+
+  # 缓存键前缀
+  key_prefix:
+    search: "search:"
+    model: "model:"
+    validation: "valid:"
+    session: "sess:"
+    literature: "lit:"
+    rule: "rule:"
+
+# ===== 日志配置 =====
+logging:
+  # 基础配置
+  level: "INFO"  # DEBUG / INFO / WARNING / ERROR / CRITICAL
+  format: "structured"  # structured / plain / json
+  date_format: "%Y-%m-%d %H:%M:%S"
+
+  # 日志输出目标
+  handlers:
+    console:
+      enabled: true
+      level: "INFO"
+      colorize: true
+    file:
+      enabled: true
+      level: "DEBUG"
+      path: "logs/thesisminer.log"
+      max_size_mb: 50  # 单文件最大大小
+      backup_count: 10  # 保留备份数
+      encoding: "utf-8"
+    error_file:
+      enabled: true
+      level: "ERROR"
+      path: "logs/error.log"
+      max_size_mb: 20
+      backup_count: 5
+    audit_file:
+      enabled: true
+      level: "INFO"
+      path: "logs/audit.log"
+      max_size_mb: 100
+      backup_count: 30
+
+  # 结构化日志字段
+  structured_fields:
+    timestamp: true
+    level: true
+    logger_name: true
+    module: true
+    function: true
+    line_number: true
+    thread_id: true
+    process_id: true
+    session_id: true
+    request_id: true
+    user_id: true
+
+  # 敏感数据脱敏
+  sensitive_data_masking:
+    enabled: true
+    fields:
+      - "password"
+      - "api_key"
+      - "secret"
+      - "token"
+      - "authorization"
+      - "credit_card"
+      - "phone"
+      - "email"
+      - "id_card"
+    mask_char: "*"
+    keep_prefix: 2
+    keep_suffix: 2
+
+  # 审计日志配置
+  audit:
+    enabled: true
+    log_user_actions: true
+    log_admin_actions: true
+    log_data_access: true
+    log_config_changes: true
+    retention_days: 365
+
+  # 内存日志处理器（用于调试）
+  memory_handler:
+    enabled: true
+    max_entries: 1000
+    level: "DEBUG"
+
+# ===== 安全配置 =====
+security:
+  # 密码哈希配置
+  password:
+    algorithm: "pbkdf2_hmac"  # pbkdf2_hmac / bcrypt / argon2
+    hash_name: "sha256"
+    iterations: 100000  # 迭代次数
+    salt_length: 32  # 盐长度（字节）
+    hash_length: 64  # 哈希长度（字节）
+    min_length: 8  # 最小密码长度
+    require_uppercase: true  # 需要大写字母
+    require_lowercase: true  # 需要小写字母
+    require_digit: true  # 需要数字
+    require_special: false  # 需要特殊字符
+
+  # JWT 配置
+  jwt:
+    secret: "${JWT_SECRET}"  # 从环境变量注入
+    algorithm: "HS256"
+    access_token_expire: 3600  # 访问令牌过期时间（秒）
+    refresh_token_expire: 604800  # 刷新令牌过期时间（秒）
+    issuer: "thesisminer"
+    audience: "thesisminer-users"
+    leeway: 10  # 时钟偏差容忍（秒）
+
+  # CSRF 配置
+  csrf:
+    enabled: true
+    token_length: 32
+    cookie_name: "csrf_token"
+    header_name: "X-CSRF-Token"
+    secure_cookie: true
+    samesite: "strict"
+
+  # API Key 加密配置
+  api_key:
+    encryption_algorithm: "xor"  # XOR 流加密
+    signature_algorithm: "hmac-sha256"
+    key_length: 32
+    prefix: "tm_"
+    env_var_pattern: "{MODEL_ID}_API_KEY"
+
+  # 会话令牌配置
+  session_token:
+    length: 64
+    expire: 86400  # 24 小时
+    refresh_threshold: 0.5  # 剩余 50% 时刷新
+    secure_cookie: true
+    httponly: true
+
+  # CORS 配置
+  cors:
+    enabled: true
+    allowed_origins:
+      - "http://localhost:3000"
+      - "http://localhost:5000"
+      - "https://thesisminer.ai"
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization", "X-CSRF-Token"]
+    allow_credentials: true
+    max_age: 3600
+
+  # 输入校验
+  input_validation:
+    max_request_size_mb: 10
+    max_query_length: 10000
+    max_json_depth: 20
+    sanitize_html: true
+    strip_whitespace: true
+
+# ===== 限流配置 =====
+rate_limiting:
+  # 全局限流
+  global:
+    enabled: true
+    algorithm: "sliding_window"  # sliding_window / token_bucket / fixed_window
+    requests_per_minute: 100
+    requests_per_hour: 1000
+    requests_per_day: 10000
+
+  # 按端点限流
+  endpoints:
+    - path: "/api/v8/topics/generate"
+      limit: 10  # 每分钟
+      burst: 5  # 突发上限
+    - path: "/api/v8/search"
+      limit: 30
+      burst: 10
+    - path: "/api/v8/validate"
+      limit: 20
+      burst: 5
+    - path: "/api/v8/stream"
+      limit: 5
+      burst: 2
+    - path: "/api/v8/auth/login"
+      limit: 5
+      burst: 3
+    - path: "/api/v8/auth/register"
+      limit: 3
+      burst: 1
+
+  # 按用户限流
+  per_user:
+    enabled: true
+    anonymous_limit: 20  # 匿名用户每分钟
+    authenticated_limit: 100  # 认证用户每分钟
+    premium_limit: 500  # 高级用户每分钟
+
+  # 令牌桶配置
+  token_bucket:
+    capacity: 100  # 桶容量
+    refill_rate: 10  # 每秒补充令牌数
+    initial_tokens: 50  # 初始令牌数
+
+  # 滑动窗口配置
+  sliding_window:
+    window_size: 60  # 窗口大小（秒）
+    max_requests: 100  # 窗口内最大请求数
+    precision: 1  # 精度（秒）
+
+  # 限流响应
+  response:
+    status_code: 429
+    headers:
+      Retry-After: "60"
+      X-RateLimit-Limit: "100"
+      X-RateLimit-Remaining: "0"
+      X-RateLimit-Reset: "60"
+
+# ===== 会话配置 =====
+session:
+  # 上下文管理
+  context:
+    max_contexts: 1000  # 最大上下文数
+    max_versions: 20  # 最大版本数
+    persist_path: "data/contexts.json"  # 持久化路径
+    auto_persist: true  # 自动持久化
+    persist_interval: 300  # 持久化间隔（秒）
+
+  # 会话超时
+  timeout:
+    idle_timeout: 1800  # 空闲超时（秒）
+    absolute_timeout: 86400  # 绝对超时（秒）
+    cleanup_interval: 600  # 清理间隔（秒）
+
+  # 历史消息
+  history:
+    max_messages: 100  # 最大消息数
+    max_tokens: 50000  # 最大 token 数
+    compression_strategy: "summarize"  # summarize / truncate / keywords
+
+# ===== 编排配置 =====
+orchestration:
+  # 管道配置
+  pipeline:
+    default_error_strategy: "skip"  # raise / skip / retry / fallback / rollback
+    default_max_retries: 2
+    default_retry_delay: 1.0
+    default_retry_backoff: 2.0
+    default_timeout: 300
+    enable_checkpoints: true
+
+  # 调度器配置
+  scheduler:
+    max_workers: 4
+    strategy: "priority"  # fifo / priority / deadline / round_robin
+    default_timeout: 300
+    poll_interval: 0.1
+    max_queue_size: 10000
+    enable_dead_task_cleanup: true
+    dead_task_ttl: 3600
+
+  # 执行器配置
+  executor:
+    max_workers: 4
+    default_timeout: 300
+    enable_monitor: true
+
+# ===== SSE 流式配置 =====
+streaming:
+  # SSE 事件配置
+  sse:
+    enabled: true
+    heartbeat_interval: 15  # 心跳间隔（秒）
+    event_buffer_size: 100  # 事件缓冲区大小
+    connection_timeout: 300  # 连接超时（秒）
+
+  # 背压控制
+  backpressure:
+    enabled: true
+    high_watermark: 80  # 高水位（缓冲区 80% 时暂停）
+    low_watermark: 30  # 低水位（缓冲区 30% 时恢复）
+    max_buffer_size: 1000  # 最大缓冲区大小
+
+  # 流式聚合
+  aggregation:
+    chunk_timeout: 30  # 分块超时（秒）
+    max_chunk_size: 4096  # 最大分块大小（字节）
+    flush_interval: 0.1  # 刷新间隔（秒）
+
+# ===== 文献检索配置 =====
+literature_search:
+  # 检索源配置
+  sources:
+    - name: "arxiv"
+      enabled: true
+      api_url: "http://export.arxiv.org/api/query"
+      max_results: 50
+      rate_limit: 3  # 每秒请求数
+    - name: "semantic_scholar"
+      enabled: true
+      api_url: "https://api.semanticscholar.org/graph/v1"
+      max_results: 100
+      rate_limit: 1
+    - name: "crossref"
+      enabled: false
+      api_url: "https://api.crossref.org/works"
+      max_results: 50
+      rate_limit: 2
+    - name: "google_scholar"
+      enabled: false
+      api_url: ""
+      max_results: 20
+      rate_limit: 1
+
+  # 检索参数
+  params:
+    default_limit: 30  # 默认结果数
+    max_limit: 100  # 最大结果数
+    timeout: 30  # 超时（秒）
+    retry_count: 2  # 重试次数
+    cache_ttl: 3600  # 缓存 TTL（秒）
+
+  # 文献基线（按学位）
+  baseline:
+    master: 30  # 硕士文献基线数
+    doctor: 50  # 博士文献基线数
+
+# ===== 学术日历配置 =====
+academic_calendar:
+  master:
+    max_years: 1
+    description: "硕士1年内出结果"
+    milestones:
+      - month: 1
+        task: "选题与开题报告"
+      - month: 3
+        task: "文献综述完成"
+      - month: 6
+        task: "实验方案确定"
+      - month: 9
+        task: "中期检查"
+      - month: 12
+        task: "论文初稿"
+  doctor:
+    max_years: 2
+    description: "博士2年内出结果"
+    milestones:
+      - month: 3
+        task: "选题与开题报告"
+      - month: 6
+        task: "文献综述完成"
+      - month: 12
+        task: "实验方案确定"
+      - month: 18
+        task: "中期检查"
+      - month: 24
+        task: "论文初稿"
+
+# ===== 健康检查配置 =====
+health_check:
+  enabled: true
+  interval: 30  # 检查间隔（秒）
+  timeout: 5  # 超时（秒）
+
+  checks:
+    - name: "database"
+      enabled: true
+      type: "sqlite"
+      query: "SELECT 1"
+    - name: "cache"
+      enabled: true
+      type: "memory"
+    - name: "disk_space"
+      enabled: true
+      type: "disk"
+      min_free_mb: 1000
+    - name: "memory"
+      enabled: true
+      type: "memory"
+      max_usage_percent: 90
+
+# ===== 备份配置 =====
+backup:
+  enabled: true
+  interval: 86400  # 备份间隔（秒，默认每天）
+  max_backups: 7  # 最大备份数
+  backup_dir: "data/backups"
+  compress: true
+  include:
+    - "data/thesis_miner.db"
+    - "data/contexts.json"
+    - "config/"
+  exclude:
+    - "logs/"
+    - "data/backups/"

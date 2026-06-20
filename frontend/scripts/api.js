@@ -363,6 +363,61 @@ const API = {
 
   /** 获取定价表 */
   getPricing: () => API.request('/budgets/pricing'),
+
+  /* ------------------------------------------------------------------------
+     v8.0 对话管理（多对话隔离 / Agent 路由）
+     ------------------------------------------------------------------------ */
+  /** 获取指定会话下的全部对话 */
+  getConversations: (sessionId) =>
+    API.request(`/sessions/${sessionId}/conversations`),
+
+  /** 创建新对话（指定初始 Agent 类型） */
+  createConversation: (sessionId, title = '新对话', agentId = 'orchestrator') =>
+    API.request(`/sessions/${sessionId}/conversations`, {
+      method: 'POST',
+      body: JSON.stringify({ title, agent_id: agentId }),
+    }),
+
+  /** 获取对话消息列表 */
+  getConversationMessages: (conversationId, limit = 100) =>
+    API.request(`/conversations/${conversationId}/messages?limit=${limit}`),
+
+  /** 追加一条消息到对话 */
+  addMessage: (conversationId, role, content, agentId = '', reasoning = '', citations = []) =>
+    API.request(`/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        role,
+        content,
+        agent_id: agentId,
+        reasoning,
+        citations,
+      }),
+    }),
+
+  /** 删除对话 */
+  deleteConversation: (conversationId) =>
+    API.request(`/conversations/${conversationId}`, { method: 'DELETE' }),
+
+  /** 重命名对话 */
+  renameConversation: (conversationId, title) =>
+    API.request(`/conversations/${conversationId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title }),
+    }),
+
+  /** 获取可用 Agent 列表 */
+  getAgents: () => API.request('/agents'),
+
+  /** 获取指定消息的引用卡片 */
+  getMessageCitations: (messageId) =>
+    API.request(`/messages/${messageId}/citations`),
+
+  /** 设置会话的当前激活对话 */
+  setActiveConversation: (sessionId, conversationId) =>
+    API.request(`/sessions/${sessionId}/active-conversation?cid=${conversationId}`, {
+      method: 'PUT',
+    }),
 };
 
 // 暴露到全局，供各页面脚本使用

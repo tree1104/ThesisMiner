@@ -1,0 +1,800 @@
+# =============================================================================
+# ThesisMiner v8.0 模型配置文件
+# =============================================================================
+# 本文件定义 ThesisMiner 支持的所有 LLM 模型配置，包括：
+#   - 模型基础信息（ID/标签/提供商/发布年份）
+#   - API 配置（基础 URL/API Key 环境变量/认证方式）
+#   - 能力标记（流式/思考/联网搜索/视觉/函数调用）
+#   - 上下文与生成参数（最大上下文/最大输出/温度/Top-P）
+#   - 定价信息（输入/输出/缓存/单位：人民币元/百万 Token）
+#   - 限流配置（每分钟请求数/每分钟 Token 数/每日上限）
+#   - Agent 角色偏好（默认角色/备选角色）
+#   - 降级策略（降级目标/降级条件）
+#   - 超时与重试配置
+#
+# 所有 API Key 通过环境变量注入，格式为 {MODEL_ID}_API_KEY（大写）
+# 定价单位：人民币元 / 百万 Token（CNY per million tokens）
+# =============================================================================
+
+# ===== 全局模型配置 =====
+global:
+  # 默认模型（当未指定时使用）
+  default_model: "deepseek-v3.2"
+  # 默认思考模型
+  default_reasoner: "deepseek-r2"
+  # 默认编排模型
+  default_orchestrator: "claude-sonnet-4.5"
+  # 默认检索模型
+  default_searcher: "deepseek-v3.2"
+  # 默认导师模型
+  default_mentor: "gpt-4.1"
+  # 默认创意模型
+  default_inspire: "qwen3-max"
+  # 默认报告模型
+  default_report: "claude-opus-4.5"
+
+  # 全局超时（秒）
+  default_timeout: 60
+  # 全局重试次数
+  default_max_retries: 3
+  # 全局重试初始延迟（秒）
+  default_retry_delay: 1.0
+  # 全局重试退避倍数
+  default_retry_backoff: 2.0
+
+  # 货币单位
+  currency: "CNY"
+  # 每月预算上限（元）
+  monthly_budget: 5000
+  # 每日预算上限（元）
+  daily_budget: 200
+  # 预算告警阈值（百分比）
+  budget_alert_threshold: 80
+
+  # 成本优化策略
+  cost_optimization:
+    enabled: true
+    # 低成本优先策略
+    prefer_low_cost: false
+    # 缓存命中率目标
+    cache_hit_target: 0.6
+    # 自动降级阈值（单次调用成本超过此值时降级）
+    auto_downgrade_threshold: 5.0
+
+# ===== 模型提供商配置 =====
+providers:
+  openai:
+    name: "OpenAI"
+    base_url: "https://api.openai.com/v1"
+    api_key_env: "OPENAI_API_KEY"
+    auth_type: "bearer"
+    docs_url: "https://platform.openai.com/docs"
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 150000
+    timeout: 60
+
+  deepseek:
+    name: "DeepSeek"
+    base_url: "https://api.deepseek.com/v1"
+    api_key_env: "DEEPSEEK_API_KEY"
+    auth_type: "bearer"
+    docs_url: "https://platform.deepseek.com/docs"
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 100000
+    timeout: 60
+
+  anthropic:
+    name: "Anthropic"
+    base_url: "https://api.anthropic.com/v1"
+    api_key_env: "ANTHROPIC_API_KEY"
+    auth_type: "x-api-key"
+    docs_url: "https://docs.anthropic.com"
+    rate_limit:
+      requests_per_minute: 50
+      tokens_per_minute: 120000
+    timeout: 90
+
+  alibaba:
+    name: "Alibaba Cloud"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api_key_env: "DASHSCOPE_API_KEY"
+    auth_type: "bearer"
+    docs_url: "https://help.aliyun.com/zh/dashscope"
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 100000
+    timeout: 60
+
+  google:
+    name: "Google AI"
+    base_url: "https://generativelanguage.googleapis.com/v1beta"
+    api_key_env: "GOOGLE_API_KEY"
+    auth_type: "query-param"
+    docs_url: "https://ai.google.dev/docs"
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 120000
+    timeout: 60
+
+  zhipu:
+    name: "Zhipu AI"
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    api_key_env: "ZHIPU_API_KEY"
+    auth_type: "bearer"
+    docs_url: "https://open.bigmodel.cn/dev/api"
+    rate_limit:
+      requests_per_minute: 50
+      tokens_per_minute: 80000
+    timeout: 60
+
+  bytedance:
+    name: "ByteDance Volcengine"
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    api_key_env: "VOLCENGINE_API_KEY"
+    auth_type: "bearer"
+    docs_url: "https://www.volcengine.com/docs/82379"
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 100000
+    timeout: 60
+
+# ===== 模型定义 =====
+models:
+
+  # ---------------------------------------------------------------------------
+  # 1. GPT-4.1 Mini（OpenAI，2025）- 低成本快速模型
+  # ---------------------------------------------------------------------------
+  - id: "gpt-4.1-mini"
+    label: "GPT-4.1 Mini"
+    provider: "openai"
+    release_year: 2025
+    description: "OpenAI 低成本快速模型，适合简单对话与轻量任务"
+
+    # API 配置
+    api:
+      base_url: "https://api.openai.com/v1"
+      api_key_env: "OPENAI_API_KEY"
+      model_name: "gpt-4.1-mini"
+      auth_type: "bearer"
+
+    # 能力标记
+    capabilities:
+      supports_streaming: true
+      supports_thinking: false
+      supports_web_search: false
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: true
+      supports_parallel_function_calling: true
+
+    # 上下文与生成参数
+    context:
+      max_context: 1000000
+      max_output: 16384
+      default_temperature: 0.7
+      default_top_p: 1.0
+      default_max_tokens: 4096
+      chars_per_token: 4.0  # 估算：每 token 约 4 字符
+
+    # 定价（人民币元/百万 Token）
+    pricing:
+      input_cny_per_million: 0.7
+      output_cny_per_million: 2.8
+      cached_input_cny_per_million: 0.35
+      currency: "CNY"
+
+    # 限流
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 150000
+      requests_per_day: 10000
+      concurrent_requests: 5
+
+    # Agent 角色偏好
+    agent_roles:
+      default: "mentor"
+      alternatives: ["search", "inspire"]
+
+    # 降级策略
+    fallback:
+      target_model: "doubao-1.5-pro"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    # 超时与重试
+    timeout: 30
+    max_retries: 2
+    retry_delay: 1.0
+
+  # ---------------------------------------------------------------------------
+  # 2. GPT-4.1（OpenAI，2025）- 高质量通用模型
+  # ---------------------------------------------------------------------------
+  - id: "gpt-4.1"
+    label: "GPT-4.1"
+    provider: "openai"
+    release_year: 2025
+    description: "OpenAI 高质量通用模型，适合复杂推理与高质量生成"
+
+    api:
+      base_url: "https://api.openai.com/v1"
+      api_key_env: "OPENAI_API_KEY"
+      model_name: "gpt-4.1"
+      auth_type: "bearer"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: false
+      supports_web_search: false
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: true
+      supports_parallel_function_calling: true
+
+    context:
+      max_context: 1000000
+      max_output: 32768
+      default_temperature: 0.7
+      default_top_p: 1.0
+      default_max_tokens: 8192
+      chars_per_token: 4.0
+
+    pricing:
+      input_cny_per_million: 14
+      output_cny_per_million: 56
+      cached_input_cny_per_million: 7
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 50
+      tokens_per_minute: 120000
+      requests_per_day: 5000
+      concurrent_requests: 3
+
+    agent_roles:
+      default: "mentor"
+      alternatives: ["orchestrator", "report"]
+
+    fallback:
+      target_model: "gpt-4.1-mini"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+
+    timeout: 60
+    max_retries: 3
+    retry_delay: 2.0
+
+  # ---------------------------------------------------------------------------
+  # 3. DeepSeek V3.2（DeepSeek，2026）- 高性价比通用模型
+  # ---------------------------------------------------------------------------
+  - id: "deepseek-v3.2"
+    label: "DeepSeek V3.2 (2026)"
+    provider: "deepseek"
+    release_year: 2026
+    description: "DeepSeek 2026 最新通用模型，高性价比，支持联网搜索"
+
+    api:
+      base_url: "https://api.deepseek.com/v1"
+      api_key_env: "DEEPSEEK_API_KEY"
+      model_name: "deepseek-chat"
+      auth_type: "bearer"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: false
+      supports_web_search: true
+      supports_vision: false
+      supports_function_calling: true
+      supports_json_mode: true
+      supports_parallel_function_calling: false
+
+    context:
+      max_context: 128000
+      max_output: 8192
+      default_temperature: 0.7
+      default_top_p: 1.0
+      default_max_tokens: 4096
+      chars_per_token: 3.5
+
+    pricing:
+      input_cny_per_million: 1
+      output_cny_per_million: 4
+      cached_input_cny_per_million: 0.5
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 100000
+      requests_per_day: 10000
+      concurrent_requests: 5
+
+    agent_roles:
+      default: "search"
+      alternatives: ["mentor", "inspire"]
+
+    fallback:
+      target_model: "doubao-1.5-pro"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    timeout: 60
+    max_retries: 3
+    retry_delay: 1.0
+
+  # ---------------------------------------------------------------------------
+  # 4. DeepSeek R2 Reasoner（DeepSeek，2026）- 深度推理模型
+  # ---------------------------------------------------------------------------
+  - id: "deepseek-r2"
+    label: "DeepSeek R2 Reasoner (2026)"
+    provider: "deepseek"
+    release_year: 2026
+    description: "DeepSeek 2026 最新推理模型，支持深度思考链，适合复杂逻辑推理"
+
+    api:
+      base_url: "https://api.deepseek.com/v1"
+      api_key_env: "DEEPSEEK_API_KEY"
+      model_name: "deepseek-reasoner"
+      auth_type: "bearer"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: true
+      supports_web_search: false
+      supports_vision: false
+      supports_function_calling: false
+      supports_json_mode: false
+      supports_parallel_function_calling: false
+
+    context:
+      max_context: 128000
+      max_output: 16384
+      default_temperature: 0.0
+      default_top_p: 1.0
+      default_max_tokens: 8192
+      chars_per_token: 3.5
+
+    pricing:
+      input_cny_per_million: 4
+      output_cny_per_million: 16
+      cached_input_cny_per_million: 2
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 30
+      tokens_per_minute: 60000
+      requests_per_day: 3000
+      concurrent_requests: 2
+
+    agent_roles:
+      default: "reasoner"
+      alternatives: ["critic"]
+
+    fallback:
+      target_model: "qwen3-max"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    timeout: 120
+    max_retries: 2
+    retry_delay: 2.0
+
+  # ---------------------------------------------------------------------------
+  # 5. Claude Sonnet 4.5（Anthropic，2026）- 编排专用模型
+  # ---------------------------------------------------------------------------
+  - id: "claude-sonnet-4.5"
+    label: "Claude Sonnet 4.5 (2026)"
+    provider: "anthropic"
+    release_year: 2026
+    description: "Anthropic 2026 最新 Sonnet 模型，平衡质量与速度，适合编排与对话"
+
+    api:
+      base_url: "https://api.anthropic.com/v1"
+      api_key_env: "ANTHROPIC_API_KEY"
+      model_name: "claude-sonnet-4-5-20260610"
+      auth_type: "x-api-key"
+      api_version: "2024-01-01"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: true
+      supports_web_search: true
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: false
+      supports_parallel_function_calling: true
+
+    context:
+      max_context: 200000
+      max_output: 16384
+      default_temperature: 0.7
+      default_top_p: 1.0
+      default_max_tokens: 8192
+      chars_per_token: 4.0
+
+    pricing:
+      input_cny_per_million: 22
+      output_cny_per_million: 110
+      cached_input_cny_per_million: 11
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 50
+      tokens_per_minute: 120000
+      requests_per_day: 5000
+      concurrent_requests: 3
+
+    agent_roles:
+      default: "orchestrator"
+      alternatives: ["mentor", "reasoner"]
+
+    fallback:
+      target_model: "gpt-4.1"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    timeout: 90
+    max_retries: 3
+    retry_delay: 2.0
+
+  # ---------------------------------------------------------------------------
+  # 6. Claude Opus 4.5（Anthropic，2026）- 顶级质量模型
+  # ---------------------------------------------------------------------------
+  - id: "claude-opus-4.5"
+    label: "Claude Opus 4.5 (2026)"
+    provider: "anthropic"
+    release_year: 2026
+    description: "Anthropic 2026 最新 Opus 模型，顶级质量，适合高质量报告生成"
+
+    api:
+      base_url: "https://api.anthropic.com/v1"
+      api_key_env: "ANTHROPIC_API_KEY"
+      model_name: "claude-opus-4-5-20260610"
+      auth_type: "x-api-key"
+      api_version: "2024-01-01"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: true
+      supports_web_search: true
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: false
+      supports_parallel_function_calling: true
+
+    context:
+      max_context: 200000
+      max_output: 32768
+      default_temperature: 0.7
+      default_top_p: 1.0
+      default_max_tokens: 16384
+      chars_per_token: 4.0
+
+    pricing:
+      input_cny_per_million: 110
+      output_cny_per_million: 550
+      cached_input_cny_per_million: 55
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 20
+      tokens_per_minute: 40000
+      requests_per_day: 1000
+      concurrent_requests: 1
+
+    agent_roles:
+      default: "report"
+      alternatives: ["orchestrator"]
+
+    fallback:
+      target_model: "claude-sonnet-4.5"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "cost_exceeded"
+
+    timeout: 120
+    max_retries: 2
+    retry_delay: 3.0
+
+  # ---------------------------------------------------------------------------
+  # 7. Qwen3 Max（阿里通义，2026）- 创意生成模型
+  # ---------------------------------------------------------------------------
+  - id: "qwen3-max"
+    label: "Qwen3 Max (2026)"
+    provider: "alibaba"
+    release_year: 2026
+    description: "阿里通义 2026 最新 Max 模型，支持思考与联网，适合创意生成"
+
+    api:
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      api_key_env: "DASHSCOPE_API_KEY"
+      model_name: "qwen-max-2026-01-25"
+      auth_type: "bearer"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: true
+      supports_web_search: true
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: true
+      supports_parallel_function_calling: false
+
+    context:
+      max_context: 131072
+      max_output: 8192
+      default_temperature: 0.7
+      default_top_p: 0.9
+      default_max_tokens: 4096
+      chars_per_token: 3.0
+
+    pricing:
+      input_cny_per_million: 2.4
+      output_cny_per_million: 9.6
+      cached_input_cny_per_million: 1.2
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 100000
+      requests_per_day: 5000
+      concurrent_requests: 3
+
+    agent_roles:
+      default: "inspire"
+      alternatives: ["mentor", "search"]
+
+    fallback:
+      target_model: "deepseek-v3.2"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    timeout: 60
+    max_retries: 3
+    retry_delay: 1.5
+
+  # ---------------------------------------------------------------------------
+  # 8. Gemini 2.5 Pro（Google，2026）- 超长上下文模型
+  # ---------------------------------------------------------------------------
+  - id: "gemini-2.5-pro"
+    label: "Gemini 2.5 Pro (2026)"
+    provider: "google"
+    release_year: 2026
+    description: "Google 2026 最新 Gemini Pro 模型，200 万超长上下文，适合长文档处理"
+
+    api:
+      base_url: "https://generativelanguage.googleapis.com/v1beta"
+      api_key_env: "GOOGLE_API_KEY"
+      model_name: "gemini-2.5-pro-2026-01"
+      auth_type: "query-param"
+      api_version: "v1beta"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: true
+      supports_web_search: true
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: true
+      supports_parallel_function_calling: true
+
+    context:
+      max_context: 2000000
+      max_output: 32768
+      default_temperature: 0.7
+      default_top_p: 1.0
+      default_max_tokens: 8192
+      chars_per_token: 4.0
+
+    pricing:
+      input_cny_per_million: 9
+      output_cny_per_million: 36
+      cached_input_cny_per_million: 4.5
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 120000
+      requests_per_day: 5000
+      concurrent_requests: 3
+
+    agent_roles:
+      default: "reasoner"
+      alternatives: ["search", "mentor"]
+
+    fallback:
+      target_model: "qwen3-max"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    timeout: 90
+    max_retries: 3
+    retry_delay: 2.0
+
+  # ---------------------------------------------------------------------------
+  # 9. GLM-4.6（智谱，2026）- 国产通用模型
+  # ---------------------------------------------------------------------------
+  - id: "glm-4.6"
+    label: "GLM-4.6 (2026)"
+    provider: "zhipu"
+    release_year: 2026
+    description: "智谱 2026 最新 GLM 模型，支持思考与联网，适合导师对话"
+
+    api:
+      base_url: "https://open.bigmodel.cn/api/paas/v4"
+      api_key_env: "ZHIPU_API_KEY"
+      model_name: "glm-4-6-2026"
+      auth_type: "bearer"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: true
+      supports_web_search: true
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: true
+      supports_parallel_function_calling: false
+
+    context:
+      max_context: 131072
+      max_output: 8192
+      default_temperature: 0.7
+      default_top_p: 0.9
+      default_max_tokens: 4096
+      chars_per_token: 3.0
+
+    pricing:
+      input_cny_per_million: 5
+      output_cny_per_million: 5
+      cached_input_cny_per_million: 2.5
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 50
+      tokens_per_minute: 80000
+      requests_per_day: 5000
+      concurrent_requests: 3
+
+    agent_roles:
+      default: "mentor"
+      alternatives: ["inspire", "search"]
+
+    fallback:
+      target_model: "deepseek-v3.2"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    timeout: 60
+    max_retries: 3
+    retry_delay: 1.5
+
+  # ---------------------------------------------------------------------------
+  # 10. Doubao 1.5 Pro（字节豆包，2026）- 极低成本模型
+  # ---------------------------------------------------------------------------
+  - id: "doubao-1.5-pro"
+    label: "Doubao 1.5 Pro (2026)"
+    provider: "bytedance"
+    release_year: 2026
+    description: "字节豆包 2026 最新模型，极低成本，支持联网搜索，适合批量检索"
+
+    api:
+      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+      api_key_env: "VOLCENGINE_API_KEY"
+      model_name: "doubao-1-5-pro-2026"
+      auth_type: "bearer"
+
+    capabilities:
+      supports_streaming: true
+      supports_thinking: false
+      supports_web_search: true
+      supports_vision: true
+      supports_function_calling: true
+      supports_json_mode: true
+      supports_parallel_function_calling: false
+
+    context:
+      max_context: 131072
+      max_output: 4096
+      default_temperature: 0.7
+      default_top_p: 1.0
+      default_max_tokens: 2048
+      chars_per_token: 3.0
+
+    pricing:
+      input_cny_per_million: 0.8
+      output_cny_per_million: 2
+      cached_input_cny_per_million: 0.4
+      currency: "CNY"
+
+    rate_limit:
+      requests_per_minute: 60
+      tokens_per_minute: 100000
+      requests_per_day: 10000
+      concurrent_requests: 5
+
+    agent_roles:
+      default: "search"
+      alternatives: ["mentor"]
+
+    fallback:
+      target_model: "deepseek-v3.2"
+      conditions:
+        - "rate_limit_exceeded"
+        - "timeout"
+        - "service_unavailable"
+
+    timeout: 30
+    max_retries: 3
+    retry_delay: 1.0
+
+# ===== 模型对比表 =====
+comparison:
+  # 按成本排序（从低到高）
+  by_cost:
+    - "doubao-1.5-pro"
+    - "gpt-4.1-mini"
+    - "deepseek-v3.2"
+    - "qwen3-max"
+    - "glm-4.6"
+    - "gemini-2.5-pro"
+    - "deepseek-r2"
+    - "gpt-4.1"
+    - "claude-sonnet-4.5"
+    - "claude-opus-4.5"
+
+  # 按上下文长度排序（从长到短）
+  by_context:
+    - "gemini-2.5-pro"  # 200 万
+    - "gpt-4.1-mini"    # 100 万
+    - "gpt-4.1"         # 100 万
+    - "claude-sonnet-4.5"  # 20 万
+    - "claude-opus-4.5"    # 20 万
+    - "qwen3-max"       # 13 万
+    - "glm-4.6"         # 13 万
+    - "doubao-1.5-pro"  # 13 万
+    - "deepseek-v3.2"   # 12.8 万
+    - "deepseek-r2"     # 12.8 万
+
+  # 按推理能力排序
+  by_reasoning:
+    - "claude-opus-4.5"
+    - "deepseek-r2"
+    - "gemini-2.5-pro"
+    - "gpt-4.1"
+    - "claude-sonnet-4.5"
+    - "qwen3-max"
+    - "glm-4.6"
+    - "deepseek-v3.2"
+    - "gpt-4.1-mini"
+    - "doubao-1.5-pro"
+
+# ===== A/B 测试配置 =====
+ab_testing:
+  enabled: false
+  experiments:
+    - name: "generation_quality"
+      model_a: "claude-sonnet-4.5"
+      model_b: "gpt-4.1"
+      traffic_split: 0.5
+      metrics: ["quality_score", "user_satisfaction"]
+    - name: "search_efficiency"
+      model_a: "deepseek-v3.2"
+      model_b: "doubao-1.5-pro"
+      traffic_split: 0.5
+      metrics: ["response_time", "result_relevance"]

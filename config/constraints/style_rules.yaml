@@ -1,0 +1,447 @@
+# ThesisMiner v8.0 去 AI 痕迹风格规范配置
+# 版本：v8.0
+# 日期：2026-06-19
+# 适用范围：backend/constraints/style_normalizer.py、backend/agents/proposal_writer.py
+# 说明：定义 AI 生成文本的典型痕迹替换规则，确保产出文本符合人类学术写作风格
+
+# 全局开关
+global:
+  enabled: true
+  strict_mode: false             # 严格模式（检测到未替换痕迹则阻断）
+  log_replacements: true         # 记录替换日志
+
+# 句式结构约束
+sentence_structure:
+  # 句长分布（目标：接近人类学术写作的句长分布）
+  length_distribution:
+    min_chars: 8                 # 最短句长（字）
+    max_chars: 80                # 最长句长（字）
+    ideal_range: [15, 60]        # 理想句长区间
+    short_sentence_ratio: 0.25   # 短句（<20字）占比上限
+    long_sentence_ratio: 0.15    # 长句（>60字）占比上限
+
+  # 并列结构约束
+  parallel_structure:
+    max_consecutive: 3           # 连续并列项最大数（超过则拆分）
+    avoid_over_symmetry: true    # 避免过度对仗（AI 常见痕迹）
+
+  # 段落结构约束
+  paragraph_structure:
+    min_sentences: 3             # 段落最少句数
+    max_sentences: 8             # 段落最多句数
+    avoid_template_transitions: true  # 避免模板化过渡句
+
+# 模板词替换表（AI 高频痕迹词 → 人类学术表达）
+# 每条规则：pattern 为正则，replacement 为替换文本，scope 为作用域
+replacements:
+  # === 篇章连接词类 ===
+  - id: R001
+    pattern: "首先[，,]"
+    replacement: ""
+    reason: AI 高频开头模板词
+    scope: paragraph_start
+
+  - id: R002
+    pattern: "其次[，,]"
+    replacement: "进而，"
+    reason: 机械序号连接
+    scope: global
+
+  - id: R003
+    pattern: "再次[，,]"
+    replacement: "在此基础上，"
+    reason: 机械序号连接
+    scope: global
+
+  - id: R004
+    pattern: "最后[，,]"
+    replacement: "最终，"
+    reason: 机械序号连接
+    scope: global
+
+  - id: R005
+    pattern: "综上所述[，,]"
+    replacement: "由此可见，"
+    reason: AI 总结模板词
+    scope: paragraph_start
+
+  - id: R006
+    pattern: "总而言之[，,]"
+    replacement: "整体来看，"
+    reason: AI 总结模板词
+    scope: paragraph_start
+
+  - id: R007
+    pattern: "总之[，,]"
+    replacement: "据此，"
+    reason: AI 总结模板词
+    scope: global
+
+  - id: R008
+    pattern: "由此可见[，,]"
+    replacement: "由此，"
+    reason: 过度使用痕迹
+    scope: global
+
+  # === 强调副词类 ===
+  - id: R009
+    pattern: "值得注意的是[，,]"
+    replacement: "需要指出，"
+    reason: AI 强调模板
+    scope: global
+
+  - id: R010
+    pattern: "需要指出的是[，,]"
+    replacement: "应当看到，"
+    reason: AI 强调模板
+    scope: global
+
+  - id: R011
+    pattern: "值得一提的是[，,]"
+    replacement: ""
+    reason: 冗余强调
+    scope: global
+
+  - id: R012
+    pattern: "显而易见[，,]"
+    replacement: "不难发现，"
+    reason: AI 口吻痕迹
+    scope: global
+
+  - id: R013
+    pattern: "毋庸置疑[，,]"
+    replacement: "可以确定的是，"
+    reason: 过度绝对化
+    scope: global
+
+  - id: R014
+    pattern: "至关重要"
+    replacement: "具有关键作用"
+    reason: AI 高频套话
+    scope: global
+
+  - id: R015
+    pattern: "举足轻重"
+    replacement: "影响显著"
+    reason: AI 高频套话
+    scope: global
+
+  # === 转折让步类 ===
+  - id: R016
+    pattern: "然而[，,]需要(注意|指出)"
+    replacement: "不过，"
+    reason: 冗长转折
+    scope: global
+
+  - id: R017
+    pattern: "尽管如此[，,]"
+    replacement: "即便如此，"
+    reason: AI 转折模板
+    scope: global
+
+  - id: R018
+    pattern: "与此同时[，,]"
+    replacement: "同时，"
+    reason: AI 连接模板
+    scope: global
+
+  - id: R019
+    pattern: "另一方面[，,]"
+    replacement: "此外，"
+    reason: AI 连接模板
+    scope: global
+
+  # === 因果推导类 ===
+  - id: R020
+    pattern: "因此[，,]"
+    replacement: "据此，"
+    reason: AI 高频因果词
+    scope: global
+
+  - id: R021
+    pattern: "由此可见一斑[，,]"
+    replacement: ""
+    reason: AI 套话
+    scope: global
+
+  - id: R022
+    pattern: "这(表明|说明|意味着)[，,]"
+    replacement: "这反映出，"
+    reason: AI 推导模板
+    scope: global
+
+  - id: R023
+    pattern: "进一步(说|讲)[，,]"
+    replacement: "深入来看，"
+    reason: AI 推导模板
+    scope: global
+
+  # === 程度修饰类 ===
+  - id: R024
+    pattern: "极大地"
+    replacement: "显著"
+    reason: AI 程度副词滥用
+    scope: global
+
+  - id: R025
+    pattern: "充分地"
+    replacement: "充分"
+    reason: 地字冗余
+    scope: global
+
+  - id: R026
+    pattern: "有效地"
+    replacement: "有效"
+    reason: 地字冗余
+    scope: global
+
+  - id: R027
+    pattern: "显著地"
+    replacement: "显著"
+    reason: 地字冗余
+    scope: global
+
+  - id: R028
+    pattern: "一定程度上"
+    replacement: "部分"
+    reason: AI 模糊程度词
+    scope: global
+
+  # === 学术套话类 ===
+  - id: R029
+    pattern: "具有(重要|重大)的(理论|现实)意义"
+    replacement: "在理论与实践层面均有价值"
+    reason: AI 套话模板
+    scope: global
+
+  - id: R030
+    pattern: "为.*提供了(新|全新)的(视角|思路|方法)"
+    replacement: "拓展了.*的研究路径"
+    reason: AI 套话模板
+    scope: global
+
+  - id: R031
+    pattern: "填补了.*的(空白|漏洞)"
+    replacement: "补充了.*的不足"
+    reason: AI 夸大表述
+    scope: global
+
+  - id: R032
+    pattern: "开辟了.*的新(方向|领域)"
+    replacement: "拓展了.*的研究边界"
+    reason: AI 夸大表述
+    scope: global
+
+  - id: R033
+    pattern: "具有广阔的(应用|发展)前景"
+    replacement: "具备应用潜力"
+    reason: AI 套话模板
+    scope: global
+
+  - id: R034
+    pattern: "引起了(广泛|学术界的)关注"
+    replacement: "受到学界关注"
+    reason: AI 套话模板
+    scope: global
+
+  # === 列举模板类 ===
+  - id: R035
+    pattern: "主要包括以下几个方面"
+    replacement: "涉及"
+    reason: AI 列举模板
+    scope: global
+
+  - id: R036
+    pattern: "具体表现在以下几个方面"
+    replacement: "体现为"
+    reason: AI 列举模板
+    scope: global
+
+  - id: R037
+    pattern: "可以从以下几个方面(展开|分析)"
+    replacement: "可从以下维度切入"
+    reason: AI 列举模板
+    scope: global
+
+  # === 对仗排比类（AI 常见痕迹）===
+  - id: R038
+    pattern: "不仅.*而且.*更"
+    replacement: "既.*也"
+    reason: 三段对仗过度工整
+    scope: global
+
+  - id: R039
+    pattern: "既.*又.*还"
+    replacement: "兼具.*与"
+    reason: 三段排比痕迹
+    scope: global
+
+  - id: R040
+    pattern: "一方面.*另一方面.*再一方面"
+    replacement: "其一.*其二"
+    reason: 三段并列痕迹
+    scope: global
+
+  # === 冗余修饰类 ===
+  - id: R041
+    pattern: "进行了(深入|系统)的(研究|分析|探讨)"
+    replacement: "深入研究了"
+    reason: 冗余结构
+    scope: global
+
+  - id: R042
+    pattern: "做出了(重要|突出)贡献"
+    replacement: "贡献显著"
+    reason: 冗余结构
+    scope: global
+
+  - id: R043
+    pattern: "起到了(重要|关键)作用"
+    replacement: "作用关键"
+    reason: 冗余结构
+    scope: global
+
+  - id: R044
+    pattern: "取得了(显著|明显)成效"
+    replacement: "成效显著"
+    reason: 冗余结构
+    scope: global
+
+  # === 口语化与书面化混用 ===
+  - id: R045
+    pattern: "其实[，,]"
+    replacement: "实际上，"
+    reason: 口语化
+    scope: global
+
+  - id: R046
+    pattern: "当然[，,]"
+    replacement: "诚然，"
+    reason: 口语化
+    scope: global
+
+  - id: R047
+    pattern: "毕竟[，,]"
+    replacement: "毕竟，"
+    reason: 口语化（保留但规范化）
+    scope: global
+
+  - id: R048
+    pattern: "说白了[，,]"
+    replacement: "简言之，"
+    reason: 口语化
+    scope: global
+
+  # === 过度绝对化表述 ===
+  - id: R049
+    pattern: "完全(解决|消除|克服)"
+    replacement: "基本解决"
+    reason: 学术写作避免绝对化
+    scope: global
+
+  - id: R050
+    pattern: "彻底(改变|颠覆|革新)"
+    replacement: "深刻影响"
+    reason: 学术写作避免绝对化
+    scope: global
+
+  - id: R051
+    pattern: "唯一(方法|途径|方案)"
+    replacement: "主要方法之一"
+    reason: 学术写作避免绝对化
+    scope: global
+
+  - id: R052
+    pattern: "必定(会|能够)"
+    replacement: "有望"
+    reason: 学术写作避免绝对化
+    scope: global
+
+  # === AI 高频名词短语 ===
+  - id: R053
+    pattern: "在当今社会"
+    replacement: "当前"
+    reason: AI 套话
+    scope: global
+
+  - id: R054
+    pattern: "随着.*的(快速|迅猛)发展"
+    replacement: "伴随.*发展"
+    reason: AI 开头模板
+    scope: paragraph_start
+
+  - id: R055
+    pattern: "在.*背景下"
+    replacement: "在.*语境下"
+    reason: AI 高频短语
+    scope: global
+
+# 禁用句式（直接标记为 WARNING，不自动替换）
+forbidden_patterns:
+  - "本文将从.*角度出发"          # AI 开头模板
+  - "本研究旨在"                  # AI 目的模板（建议改为"本研究聚焦于"）
+  - "本文(主要|重点)探讨"          # AI 主题模板
+  - "通过.*分析.*得出.*结论"       # AI 流程模板
+  - "基于以上(分析|讨论)[，,]可以(得出|认为)"  # AI 推导模板
+
+# 标点规范
+punctuation:
+  # 连续逗号限制（AI 常堆叠逗号构成长句）
+  max_consecutive_commas: 3
+  # 破折号使用规范
+  dash_style: "——"              # 中文破折号双连
+  # 省略号规范
+  ellipsis_style: "……"          # 中文省略号六点
+  # 引号规范
+  quote_style: chinese           # 中文引号「」或“”
+
+# 词汇多样性约束
+lexical_diversity:
+  # 同一词在 200 字内重复次数上限
+  max_repeat_in_window: 3
+  # 高频动词替换建议
+  verb_synonyms:
+    提出: [给出, 构建, 形成]
+    分析: [剖析, 考察, 探究]
+    研究: [考察, 探讨, 审视]
+    实现: [达成, 落实, 完成]
+    影响: [作用于, 牵动, 左右]
+
+# 检测后处理
+post_processing:
+  # 替换后重新检测句长分布
+  recheck_sentence_length: true
+  # 替换后重新检测并列结构
+  recheck_parallel_structure: true
+  # 生成处理前后对比报告
+  generate_diff_report: true
+  # 对比报告字段
+  diff_fields:
+    - original_text
+    - normalized_text
+    - replacements_applied
+    - warnings
+    - ai_trace_score_before
+    - ai_trace_score_after
+
+# AI 痕迹评分（0-100，越低越像人类写作）
+ai_trace_scoring:
+  # 每检测到一处模板词扣分
+  per_template_word_penalty: 5
+  # 每检测到一处禁用句式扣分
+  per_forbidden_pattern_penalty: 10
+  # 句长分布异常扣分
+  length_distribution_penalty: 8
+  # 过度对仗扣分
+  over_symmetry_penalty: 6
+  # 通过阈值（低于此分认为去 AI 化合格）
+  pass_threshold: 30
+
+# 元数据
+metadata:
+  version: v8.0
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  reference: skillreadme.md 去 AI 痕迹章节
+  total_rules: 55

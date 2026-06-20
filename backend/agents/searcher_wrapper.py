@@ -7,8 +7,8 @@ v6.0 增强：支持真实文献检索热插拔，通过工厂模式在 MockSear
 RealSearcher 之间切换，并提供降级机制（真实 API 超时或异常时回退到
 MockSearcher，响应附加 search_degraded 标记）。
 
-既有同步函数保持不变以兼容旧调用方；新增 MockSearcher / RealSearcher
-类提供统一异步接口，由 get_searcher() 工厂按配置返回实例。
+v8.0 升级：在保留既有同步函数与异步检索器类的基础上，新增 SearcherAgent
+作为 BaseAgent 子类，统一接入多 Agent 架构。既有函数与类保持兼容。
 """
 import asyncio
 import logging
@@ -17,7 +17,8 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from backend.config import get_settings
+from backend.agents.base_agent import AgentResult, BaseAgent
+from backend.config import get_settings, get_step_model
 
 logger = logging.getLogger(__name__)
 
@@ -485,3 +486,167 @@ def get_searcher() -> MockSearcher | RealSearcher:
     if settings.real_search_enabled:
         return RealSearcher()
     return MockSearcher()
+
+
+# ==================== SearcherAgent（v8.0 新增） ====================
+
+
+class SearcherAgent(BaseAgent):
+    """SearcherAgent - 文献检索 Agent
+
+    在保留既有同步/异步检索函数的基础上，包装为 BaseAgent 子类：
+        1. 通过 get_searcher() 工厂获取检索器实例执行文献检索
+        2. 调用 ai_proxy.call_llm 生成检索结果摘要
+        3. 返回 AgentResult，data 中包含 papers 与 citations
+    """
+
+    def __init__(self):
+        super().__init__(
+            agent_id="searcher",
+            name="Searcher",
+            description="文献检索 Agent，负责近2年文献检索与汇总",
+            system_prompt=self._default_system_prompt(),
+            model_id=get_step_model("search"),
+            temperature=0.3,
+            max_tokens=2048,
+            capabilities=["web_search"],
+        )
+
+    @staticmethod
+    def _default_system_prompt() -> str:
+        return (
+            "你是 ThesisMiner 的文献检索 Agent（Searcher）。\n"
+            "你的职责：\n"
+            "1. 根据用户研究方向调用文献检索服务获取近2年相关文献\n"
+            "2. 对检索结果进行去重、筛选与结构化整理\n"
+            "3. 生成简洁的检索摘要，标注关键文献与引用\n"
+            "4. 输出 JSON 格式：{\"summary\": str, \"key_findings\": list}\n"
+            "保持客观、学术严谨，不臆造文献。"
+        )
+
+    async def run(self, task_input: dict) -> AgentResult:
+        """执行文献检索任务
+
+        Args:
+            task_input: 包含以下字段：
+                - query: 检索关键词（必填）
+                - years: 检索年限，默认 2
+                - count: 文献数量，默认 10
+
+        Returns:
+            AgentResult，data 包含 papers 与 citations。
+        """
+        query = task_input.get("query", "")
+        years = task_input.get("years", 2)
+        count = task_input.get("count", 10)
+
+        if not query:
+            return AgentResult(
+                agent_id=self.agent_id,
+                success=False,
+                error="缺少检索关键词 query",
+            )
+
+        try:
+            # 1. 调用既有检索器获取文献
+            searcher = get_searcher()
+            search_data = await searcher.search_literature(query, count=count)
+            papers = search_data.get("papers", [])
+
+            # 2. 过滤近 years 年文献（若文献含 year 字段）
+            current_year = 2026
+            year_threshold = current_year - years
+            recent_papers = [
+                p for p in papers
+                if not isinstance(p.get("year"), int)
+                or p.get("year", 0) >= year_threshold
+            ]
+            # 若过滤后为空，回退到全部文献
+            if not recent_papers and papers:
+                recent_papers = papers
+
+            # 3. 构建引用列表
+            citations = [
+                {
+                    "title": p.get("title", ""),
+                    "authors": p.get("authors", []),
+                    "year": p.get("year"),
+                    "source": p.get("source", ""),
+                }
+                for p in recent_papers
+            ]
+
+            # 4. 调用 LLM 生成检索摘要（独立上下文）
+            user_prompt = self._build_user_prompt(query, recent_papers, years)
+            self.add_message("user", user_prompt)
+
+            # 延迟导入以避免循环依赖
+            from backend.ai.ai_proxy import call_llm
+
+            llm_result = await call_llm(
+                system_prompt=self.system_prompt,
+                user_prompt=user_prompt,
+                model=self.model_id,
+                temperature=self.temperature,
+                purpose="search",
+            )
+
+            content = llm_result.get("content", "")
+            # 记录 assistant 回复到自身上下文
+            self.add_message("assistant", content)
+
+            return AgentResult(
+                agent_id=self.agent_id,
+                success=True,
+                content=content,
+                data={
+                    "papers": recent_papers,
+                    "citations": citations,
+                    "total_found": len(recent_papers),
+                    "years": years,
+                    "search_degraded": search_data.get("search_degraded", False),
+                },
+                citations=citations,
+                token_usage={
+                    "prompt_tokens": llm_result.get("prompt_tokens", 0),
+                    "completion_tokens": llm_result.get("completion_tokens", 0),
+                    "total_tokens": llm_result.get("total_tokens", 0),
+                },
+            )
+        except Exception as e:
+            # 检索或 LLM 调用失败时返回失败结果，保留 papers 兜底
+            return AgentResult(
+                agent_id=self.agent_id,
+                success=False,
+                error=f"检索失败: {e}",
+                data={"papers": [], "citations": []},
+            )
+
+    @staticmethod
+    def _build_user_prompt(query: str, papers: list[dict], years: int) -> str:
+        """构建 LLM 用户提示
+
+        Args:
+            query: 检索关键词。
+            papers: 检索到的文献列表。
+            years: 检索年限。
+
+        Returns:
+            用户提示字符串。
+        """
+        paper_lines = []
+        for i, p in enumerate(papers[:10], 1):
+            title = p.get("title", "")
+            authors = ", ".join(p.get("authors", [])[:3])
+            year = p.get("year", "")
+            paper_lines.append(f"{i}. [{year}] {authors} - {title}")
+
+        papers_text = "\n".join(paper_lines) if paper_lines else "（暂无文献）"
+
+        return (
+            f"研究方向：{query}\n"
+            f"检索年限：近 {years} 年\n"
+            f"检索到的文献：\n{papers_text}\n\n"
+            f"请基于以上文献生成检索摘要，并指出关键发现。"
+            f"输出 JSON：{{\"summary\": str, \"key_findings\": list}}。"
+        )

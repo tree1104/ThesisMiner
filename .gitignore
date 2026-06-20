@@ -16,3 +16,12 @@ data/
 dist/
 build/
 .trae/
+
+# 临时工具脚本与草稿（不纳入版本控制）
+COMMIT_MSG.txt
+_count_lines.ps1
+_verify_temp.py
+_verify_*.py
+_*.ps1
+tmp/
+*.tmp

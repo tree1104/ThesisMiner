@@ -1,13 +1,18 @@
 """预算控制路由模块
 
 提供账本明细查询、预算估算、汇总统计、会话费用与模型定价查询接口。
+v8.0 新增 DeepSeek 缓存命中率统计接口（Task 2.6）。
 """
 from fastapi import APIRouter
 
+from backend.ai import cache_monitor
 from backend.budgets import estimator, transparent_ledger
 from backend.models import BudgetEstimateRequest
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
+
+# Task 2.6：缓存统计路由（无前缀，路径为 /api/cache-stats）
+cache_stats_router = APIRouter(tags=["cache"])
 
 
 def _enum_to_str(value) -> str:
@@ -82,5 +87,18 @@ async def get_pricing() -> dict:
             "currency": settings.currency,
             "unit": "元/百万 token" if settings.currency == "CNY" else "USD/百万 token",
         }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@cache_stats_router.get("/api/cache-stats")
+async def get_cache_stats() -> dict:
+    """获取 DeepSeek 缓存命中率统计（Task 2.6）。
+
+    返回最近 100 次调用的平均命中率、总调用数、总缓存 token 数、
+    总 prompt token 数与整体命中率。
+    """
+    try:
+        return cache_monitor.get_cache_stats()
     except Exception as e:
         return {"success": False, "error": str(e)}

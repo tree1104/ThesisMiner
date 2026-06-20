@@ -16,6 +16,10 @@ load_dotenv()
 # 用户配置文件路径
 CONFIG_FILE_PATH = "data/config.json"
 
+# 应用版本号（v8.0.0：多 Agent 架构版）
+APP_VERSION = "8.0.0"
+APP_TITLE = "ThesisMiner v8.0"
+
 
 # 按学位分级路由的模型映射
 DEGREE_MODELS = {
@@ -35,9 +39,10 @@ ACADEMIC_CALENDAR = {
     "doctor": {"max_years": 2, "description": "博士2年内出结果"},
 }
 
-# 默认多模型注册表（v7.0 新增）
-# 每个模型包含定价、能力标记与上下文长度等元信息
+# 默认多模型注册表（v8.0 更新：移除老旧模型，新增 2026 最新模型）
+# 每个模型包含定价、能力标记、上下文长度、Agent 角色偏好与发布年份
 DEFAULT_MODELS = [
+    # ===== OpenAI GPT-4.1 系列（2025）=====
     {
         "id": "gpt-4.1-mini",
         "label": "GPT-4.1 Mini",
@@ -49,6 +54,8 @@ DEFAULT_MODELS = [
         "supports_web_search": False,
         "max_context": 1000000,
         "default_temperature": 0.7,
+        "agent_default": "mentor",
+        "release_year": 2025,
     },
     {
         "id": "gpt-4.1",
@@ -61,35 +68,117 @@ DEFAULT_MODELS = [
         "supports_web_search": False,
         "max_context": 1000000,
         "default_temperature": 0.7,
+        "agent_default": "mentor",
+        "release_year": 2025,
     },
+    # ===== DeepSeek 系列（2026 最新）=====
     {
-        "id": "deepseek-chat-v3",
-        "label": "DeepSeek V3 Chat",
+        "id": "deepseek-v3.2",
+        "label": "DeepSeek V3.2 (2026)",
         "base_url": "https://api.deepseek.com/v1",
         "api_key": "",
         "pricing": {"input_cny_per_million": 1, "output_cny_per_million": 4},
         "supports_streaming": True,
         "supports_thinking": False,
-        "supports_web_search": False,
-        "max_context": 64000,
+        "supports_web_search": True,
+        "max_context": 128000,
         "default_temperature": 0.7,
+        "agent_default": "search",
+        "release_year": 2026,
     },
     {
-        "id": "deepseek-reasoner",
-        "label": "DeepSeek Reasoner (R1)",
+        "id": "deepseek-r2",
+        "label": "DeepSeek R2 Reasoner (2026)",
         "base_url": "https://api.deepseek.com/v1",
         "api_key": "",
         "pricing": {"input_cny_per_million": 4, "output_cny_per_million": 16},
         "supports_streaming": True,
         "supports_thinking": True,
         "supports_web_search": False,
-        "max_context": 64000,
+        "max_context": 128000,
         "default_temperature": 0.0,
+        "agent_default": "reasoner",
+        "release_year": 2026,
+    },
+    # ===== Anthropic Claude 系列（2026 最新）=====
+    {
+        "id": "claude-sonnet-4.5",
+        "label": "Claude Sonnet 4.5 (2026)",
+        "base_url": "https://api.anthropic.com/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 22, "output_cny_per_million": 110},
+        "supports_streaming": True,
+        "supports_thinking": True,
+        "supports_web_search": True,
+        "max_context": 200000,
+        "default_temperature": 0.7,
+        "agent_default": "orchestrator",
+        "release_year": 2026,
     },
     {
-        "id": "qwen-plus",
-        "label": "Qwen Plus",
+        "id": "claude-opus-4.5",
+        "label": "Claude Opus 4.5 (2026)",
+        "base_url": "https://api.anthropic.com/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 110, "output_cny_per_million": 550},
+        "supports_streaming": True,
+        "supports_thinking": True,
+        "supports_web_search": True,
+        "max_context": 200000,
+        "default_temperature": 0.7,
+        "agent_default": "report",
+        "release_year": 2026,
+    },
+    # ===== 阿里通义 Qwen 系列（2026 最新）=====
+    {
+        "id": "qwen3-max",
+        "label": "Qwen3 Max (2026)",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 2.4, "output_cny_per_million": 9.6},
+        "supports_streaming": True,
+        "supports_thinking": True,
+        "supports_web_search": True,
+        "max_context": 131072,
+        "default_temperature": 0.7,
+        "agent_default": "inspire",
+        "release_year": 2026,
+    },
+    # ===== Google Gemini 系列（2026 最新）=====
+    {
+        "id": "gemini-2.5-pro",
+        "label": "Gemini 2.5 Pro (2026)",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 9, "output_cny_per_million": 36},
+        "supports_streaming": True,
+        "supports_thinking": True,
+        "supports_web_search": True,
+        "max_context": 2000000,
+        "default_temperature": 0.7,
+        "agent_default": "reasoner",
+        "release_year": 2026,
+    },
+    # ===== 智谱 GLM 系列（2026 最新）=====
+    {
+        "id": "glm-4.6",
+        "label": "GLM-4.6 (2026)",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key": "",
+        "pricing": {"input_cny_per_million": 5, "output_cny_per_million": 5},
+        "supports_streaming": True,
+        "supports_thinking": True,
+        "supports_web_search": True,
+        "max_context": 131072,
+        "default_temperature": 0.7,
+        "agent_default": "mentor",
+        "release_year": 2026,
+    },
+    # ===== 字节豆包系列（2026 最新）=====
+    {
+        "id": "doubao-1.5-pro",
+        "label": "Doubao 1.5 Pro (2026)",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
         "api_key": "",
         "pricing": {"input_cny_per_million": 0.8, "output_cny_per_million": 2},
         "supports_streaming": True,
@@ -97,28 +186,19 @@ DEFAULT_MODELS = [
         "supports_web_search": True,
         "max_context": 131072,
         "default_temperature": 0.7,
-    },
-    {
-        "id": "qwen-max",
-        "label": "Qwen Max",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_key": "",
-        "pricing": {"input_cny_per_million": 2.4, "output_cny_per_million": 9.6},
-        "supports_streaming": True,
-        "supports_thinking": False,
-        "supports_web_search": True,
-        "max_context": 32768,
-        "default_temperature": 0.7,
+        "agent_default": "search",
+        "release_year": 2026,
     },
 ]
 
-# 各步骤默认模型映射（v7.0 新增）
+# 各步骤默认模型映射（v8.0 更新：使用 2026 最新模型）
 DEFAULT_STEP_MODELS = {
-    "reasoner": "gpt-4.1-mini",
-    "mentor": "gpt-4.1-mini",
-    "inspire": "gpt-4.1-mini",
-    "report": "gpt-4.1-mini",
-    "search": "gpt-4.1-mini",
+    "orchestrator": "claude-sonnet-4.5",
+    "reasoner": "deepseek-r2",
+    "mentor": "gpt-4.1",
+    "inspire": "qwen3-max",
+    "report": "claude-opus-4.5",
+    "search": "deepseek-v3.2",
 }
 
 
@@ -137,7 +217,7 @@ class Settings:
         # 默认值
         self.ai_api_key: str = os.getenv("AI_API_KEY", "")
         self.ai_base_url: str = os.getenv("AI_BASE_URL", "https://api.openai.com/v1")
-        self.ai_model: str = os.getenv("AI_MODEL", "gpt-4o-mini")
+        self.ai_model: str = os.getenv("AI_MODEL", "deepseek-v3.2")
         self.db_path: str = os.getenv("DB_PATH", "data/thesis_miner.db")
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
         self.flask_env: str = os.getenv("FLASK_ENV", "production")
@@ -205,15 +285,18 @@ class Settings:
                 ),
             }
 
-        # 多模型注册表与步骤路由（v7.0 新增）
+        # 多模型注册表与步骤路由（v7.0/v8.0 新增）
         if "models" in user_config and isinstance(user_config["models"], list):
             self.models = user_config["models"]
         if "step_models" in user_config and isinstance(
             user_config["step_models"], dict
         ):
-            # 合并，保留默认键
+            # 合并，保留默认键（v8.0 新增 orchestrator 键）
             saved = user_config["step_models"]
             self.step_models = {
+                "orchestrator": saved.get(
+                    "orchestrator", DEFAULT_STEP_MODELS["orchestrator"]
+                ),
                 "reasoner": saved.get("reasoner", DEFAULT_STEP_MODELS["reasoner"]),
                 "mentor": saved.get("mentor", DEFAULT_STEP_MODELS["mentor"]),
                 "inspire": saved.get("inspire", DEFAULT_STEP_MODELS["inspire"]),

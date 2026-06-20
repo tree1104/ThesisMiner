@@ -1,6 +1,6 @@
-"""ThesisMiner v7.0 应用入口
+"""ThesisMiner v8.0 应用入口
 
-基于 FastAPI 构建的学术论题生成系统。
+基于 FastAPI 构建的学术论题生成系统（多 Agent 架构版）。
 启动时初始化数据库，注册 API 路由，挂载前端静态资源。
 """
 import os
@@ -24,6 +24,8 @@ from backend.routes import proposals as proposals_router
 from backend.routes import constraints as constraints_router
 from backend.routes import sessions as sessions_router
 from backend.routes import budgets as budgets_router
+from backend.routes import citations as citations_router
+from backend.routes import conversations as conversations_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,8 +54,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="ThesisMiner v7.0",
-    version="7.0.0",
+    title="ThesisMiner v8.0",
+    version="8.0.0",
     lifespan=lifespan,
 )
 
@@ -75,6 +77,12 @@ app.include_router(proposals_router.router)
 app.include_router(constraints_router.router)
 app.include_router(sessions_router.router)
 app.include_router(budgets_router.router)
+# Task 2.6：缓存命中率统计路由（无前缀，路径 /api/cache-stats）
+app.include_router(budgets_router.cache_stats_router)
+# Task 10.4：引用查询路由（路径 /api/messages/{mid}/citations）
+app.include_router(citations_router.router)
+# Task 7：对话管理路由（路径 /api/sessions/{sid}/conversations 等）
+app.include_router(conversations_router.router)
 
 
 # 挂载前端静态文件目录到根路径

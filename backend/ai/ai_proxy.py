@@ -19,6 +19,8 @@ from backend.ai.prompts import (
     build_dynamic_tail,
     compute_prefix_hash,
 )
+from backend.ai.prompt_cache import is_deepseek_model
+from backend.ai.citation_parser import parse_citations
 
 # 模块级客户端缓存，按 model_id 维度缓存（v7.0 多模型支持）
 _clients: dict[str, openai.AsyncOpenAI] = {}
@@ -81,6 +83,7 @@ async def call_llm(
     response_format: dict = None,
     prefix_hash: str = None,
     extra_params: dict = None,
+    cached_prefix: dict = None,
 ) -> dict:
     """异步调用大语言模型并记录用量（v7.0 多模型与参数透传）。
 
@@ -101,11 +104,17 @@ async def call_llm(
             并附加一条带 prefix_hash 注释的系统消息便于调试。
         extra_params: 透传参数，支持 max_tokens / enable_thinking / web_search，
             按模型能力过滤后生效。
+        cached_prefix: 可选的三段式缓存前缀字典（Task 2.3），包含
+            prefix_messages 与 dynamic_messages 两个键。当模型为 DeepSeek
+            且提供此参数时，会前置 prefix_messages、追加 dynamic_messages，
+            以提升缓存命中率。结果中会附带 prefix_char_count 字段用于监控。
 
     Returns:
         调用结果字典，包含 content、model、prompt_tokens、completion_tokens、
         total_tokens、cached_tokens、cost，以及当存在思维链时附带
-        reasoning_content，当 prefix_hash 非空时附带 prefix_hash 与 cache_hit。
+        reasoning_content，当 prefix_hash 非空时附带 prefix_hash 与 cache_hit，
+        当 cached_prefix 非空时附带 prefix_char_count，以及从回复内容中
+        解析出的 citations 列表（Task 10.3）。
 
     Raises:
         ValueError: 当 AI API Key 未配置时抛出。
@@ -128,19 +137,40 @@ async def call_llm(
 
     client = get_client(used_model)
 
-    # 构建消息列表，系统提示在前，用户提示在后
-    messages = [
-        {"role": "system", "content": system_prompt},
-    ]
-    # 注入缓存控制提示（仅当提供 prefix_hash 时）
-    if prefix_hash:
-        # Anthropic 风格的 cache_control 提示（OpenAI 会忽略但无害）
-        messages[0]["cache_control"] = {"type": "ephemeral"}
-        # 附加 prefix_hash 注释的系统消息，便于调试与缓存追踪
-        messages.append(
-            {"role": "system", "content": f"[cache_prefix_id:{prefix_hash}]"}
+    # 判断是否启用三段式缓存前缀（仅 DeepSeek 模型 + 提供 cached_prefix 时）
+    use_cached_prefix = (
+        cached_prefix is not None
+        and is_deepseek_model(used_model)
+        and isinstance(cached_prefix.get("prefix_messages"), list)
+    )
+
+    if use_cached_prefix:
+        # 三段式：不可变前缀消息 + 动态尾部消息
+        messages = list(cached_prefix["prefix_messages"])
+        # 动态尾部消息（若提供则追加，否则回退到 user_prompt）
+        dynamic_messages = cached_prefix.get("dynamic_messages")
+        if dynamic_messages:
+            messages.extend(dynamic_messages)
+        else:
+            messages.append({"role": "user", "content": user_prompt})
+        prefix_char_count = len(
+            cached_prefix.get("prefix", "").encode("utf-8")
         )
-    messages.append({"role": "user", "content": user_prompt})
+    else:
+        # 构建消息列表，系统提示在前，用户提示在后
+        messages = [
+            {"role": "system", "content": system_prompt},
+        ]
+        # 注入缓存控制提示（仅当提供 prefix_hash 时）
+        if prefix_hash:
+            # Anthropic 风格的 cache_control 提示（OpenAI 会忽略但无害）
+            messages[0]["cache_control"] = {"type": "ephemeral"}
+            # 附加 prefix_hash 注释的系统消息，便于调试与缓存追踪
+            messages.append(
+                {"role": "system", "content": f"[cache_prefix_id:{prefix_hash}]"}
+            )
+        messages.append({"role": "user", "content": user_prompt})
+        prefix_char_count = 0
 
     # 构建请求参数，仅在指定 response_format 时附加（需模型支持）
     kwargs = {
@@ -221,6 +251,8 @@ async def call_llm(
         "total_tokens": total_tokens,
         "cached_tokens": cached_tokens,
         "cost": cost,
+        # Task 10.3：从回复内容中解析引用
+        "citations": parse_citations(content),
     }
     if reasoning_content:
         result["reasoning_content"] = reasoning_content
@@ -228,6 +260,9 @@ async def call_llm(
     if prefix_hash:
         result["prefix_hash"] = prefix_hash
         result["cache_hit"] = cached_tokens > 0
+    # Task 2.3：当启用三段式缓存前缀时，附带前缀字符数用于监控
+    if use_cached_prefix:
+        result["prefix_char_count"] = prefix_char_count
     return result
 
 

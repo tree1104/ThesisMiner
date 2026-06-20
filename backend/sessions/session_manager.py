@@ -15,6 +15,7 @@ from backend.database import (
     get_connection,
 )
 from backend.models import SessionCreate, SessionResponse
+from backend.sessions.conversation_manager import get_conversation_manager
 from backend.sessions.dialogue_state_tracker import extract_state
 from backend.sessions.dst_compactor import compact_history
 
@@ -55,23 +56,39 @@ def create_session(req: SessionCreate) -> dict:
     }
 
     execute_insert("sessions", session)
+
+    # v8.0：自动创建默认对话，并设为激活对话
+    cm = get_conversation_manager()
+    default_conv = cm.create_conversation(
+        session_id, title="新对话", agent_id="orchestrator"
+    )
+    session["active_conversation_id"] = default_conv["id"]
+    session["conversations"] = [default_conv]
     return session
 
 
 def get_session(session_id: str) -> dict | None:
     """根据会话 ID 查询单个会话。
 
+    v8.0：附带对话列表与激活对话详情。
+
     Args:
         session_id: 会话唯一标识。
 
     Returns:
         会话字典（context 字段已反序列化为 dict），不存在时返回 None。
+        额外包含 conversations（对话列表）与 active_conversation（激活对话）。
     """
     row = fetch_one("SELECT * FROM sessions WHERE id = ?;", (session_id,))
     if row is None:
         return None
     # context 字段反序列化
     _deserialize_context(row)
+    # v8.0：附加对话列表与激活对话
+    cm = get_conversation_manager()
+    row["conversations"] = cm.list_conversations(session_id)
+    active_cid = row.get("active_conversation_id")
+    row["active_conversation"] = cm.get_conversation(active_cid) if active_cid else None
     return row
 
 
@@ -274,3 +291,100 @@ def _deserialize_context(row: dict) -> None:
         except (json.JSONDecodeError, TypeError):
             # 解析失败时保留原始字符串
             row["context"] = raw
+
+
+# ---------------- v8.0 会话级重命名 ----------------
+
+
+def rename_session(session_id: str, title: str) -> dict | None:
+    """重命名会话标题。
+
+    Args:
+        session_id: 会话唯一标识。
+        title: 新标题。
+
+    Returns:
+        更新后的会话字典，不存在时返回 None。
+    """
+    now = datetime.datetime.now().isoformat()
+    execute_query(
+        "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?;",
+        (title, now, session_id),
+    )
+    return get_session(session_id)
+
+
+# ---------------- v8.0 对话操作委托 ----------------
+# 以下函数将对话操作委托给 ConversationManager，保持 session_manager 作为统一入口。
+
+
+def create_conversation(
+    session_id: str, title: str = "新对话", agent_id: str = "orchestrator"
+) -> dict:
+    """创建新对话（委托给 ConversationManager）。"""
+    return get_conversation_manager().create_conversation(session_id, title, agent_id)
+
+
+def list_conversations(session_id: str) -> list[dict]:
+    """列出会话下的所有对话（委托给 ConversationManager）。"""
+    return get_conversation_manager().list_conversations(session_id)
+
+
+def get_conversation(conversation_id: str) -> dict | None:
+    """获取对话详情（委托给 ConversationManager）。"""
+    return get_conversation_manager().get_conversation(conversation_id)
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """删除对话（委托给 ConversationManager）。"""
+    return get_conversation_manager().delete_conversation(conversation_id)
+
+
+def rename_conversation(conversation_id: str, title: str) -> dict | None:
+    """重命名对话（委托给 ConversationManager）。"""
+    return get_conversation_manager().rename_conversation(conversation_id, title)
+
+
+def set_active_conversation(session_id: str, conversation_id: str) -> bool:
+    """设置会话的激活对话（委托给 ConversationManager）。"""
+    return get_conversation_manager().set_active(session_id, conversation_id)
+
+
+def add_conversation_message(
+    conversation_id: str,
+    role: str,
+    content: str,
+    agent_id: str = "",
+    reasoning: str = "",
+    search_results: list = None,
+    token_usage: dict = None,
+    citations: list = None,
+) -> dict:
+    """添加消息到对话（委托给 ConversationManager）。"""
+    return get_conversation_manager().add_message(
+        conversation_id,
+        role,
+        content,
+        agent_id,
+        reasoning,
+        search_results,
+        token_usage,
+        citations,
+    )
+
+
+def get_conversation_messages(conversation_id: str, limit: int = 100) -> list[dict]:
+    """获取对话的所有消息（委托给 ConversationManager）。"""
+    return get_conversation_manager().get_messages(conversation_id, limit)
+
+
+def get_conversation_context(
+    conversation_id: str, max_tokens: int = 8000
+) -> list[dict]:
+    """获取上下文窗口（委托给 ConversationManager）。"""
+    return get_conversation_manager().get_context_window(conversation_id, max_tokens)
+
+
+def get_message_citations(message_id: str) -> list[dict]:
+    """获取消息的引用（委托给 ConversationManager）。"""
+    return get_conversation_manager().get_message_citations(message_id)

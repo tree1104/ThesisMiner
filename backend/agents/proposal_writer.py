@@ -3,12 +3,24 @@
 基于论题结构化数据，生成符合标准高校模板的 Markdown 开题报告。
 支持 AI 增强与模板兜底两种模式：AI 已配置时调用大模型扩展各章节，
 未配置或调用失败时自动降级为内置模板生成，确保功能始终可用。
+
+v8.0 升级：在保留既有函数的基础上，新增 WriterAgent 作为 BaseAgent 子类，
+支持多粒度生成（title / abstract / outline / full），统一接入多 Agent 架构。
 """
 import datetime
 import json
+import logging
 
 from backend.ai.ai_proxy import call_llm, check_api_configured
+from backend.agents.base_agent import AgentResult, BaseAgent
+from backend.config import get_step_model
 from backend.database import fetch_one
+
+logger = logging.getLogger(__name__)
+
+
+# 支持的生成粒度
+GRANULARITIES = ("title", "abstract", "outline", "full")
 
 
 async def generate_report(proposal_id: str, use_ai: bool = True) -> dict:
@@ -266,3 +278,246 @@ def _deserialize_fields(proposal: dict) -> None:
             except (json.JSONDecodeError, TypeError):
                 # 解析失败时保留原始字符串
                 pass
+
+
+# ==================== WriterAgent（v8.0 新增） ====================
+
+
+class WriterAgent(BaseAgent):
+    """WriterAgent - 多粒度开题内容生成 Agent
+
+    支持四种粒度的内容生成：
+        - title: 仅生成标题
+        - abstract: 生成摘要
+        - outline: 生成大纲
+        - full: 生成完整开题报告
+
+    在保留既有 generate_report 函数的基础上，包装为 BaseAgent 子类。
+    """
+
+    def __init__(self):
+        super().__init__(
+            agent_id="writer",
+            name="Writer",
+            description="多粒度开题内容生成 Agent",
+            system_prompt=self._default_system_prompt(),
+            model_id=get_step_model("report"),
+            temperature=0.6,
+            max_tokens=8192,
+            capabilities=["streaming"],
+        )
+
+    @staticmethod
+    def _default_system_prompt() -> str:
+        return (
+            "你是 ThesisMiner 的开题内容生成 Agent（Writer），"
+            "负责多粒度生成开题报告内容。\n"
+            "支持四种粒度：\n"
+            "1. title：仅生成论题标题（限 20 字内名词性短语）\n"
+            "2. abstract：生成 200-300 字摘要\n"
+            "3. outline：生成开题报告大纲（含选题依据/研究现状/研究内容/技术路线/进度安排）\n"
+            "4. full：生成完整 Markdown 开题报告\n\n"
+            "要求：\n"
+            "- 学术严谨，语言正式\n"
+            "- 充分利用上下文中的文献与评估信息\n"
+            "- 输出 Markdown 格式\n"
+            "- 不臆造数据，引用文献需标注"
+        )
+
+    async def run(self, task_input: dict) -> AgentResult:
+        """执行多粒度内容生成
+
+        Args:
+            task_input: 包含以下字段：
+                - topic: 论题标题
+                - granularity: 生成粒度（title / abstract / outline / full）
+                - context: 上下文字典，可包含 search_feeds / evaluation 等
+
+        Returns:
+            AgentResult，data 包含 content / granularity / word_count。
+        """
+        topic = task_input.get("topic", "")
+        granularity = task_input.get("granularity", "outline")
+        context = task_input.get("context", {}) or {}
+
+        # 校验粒度
+        if granularity not in GRANULARITIES:
+            granularity = "outline"
+
+        if not topic:
+            return AgentResult(
+                agent_id=self.agent_id,
+                success=False,
+                error="缺少论题 topic",
+                data={"content": "", "granularity": granularity, "word_count": 0},
+            )
+
+        try:
+            # 构建用户提示
+            user_prompt = self._build_user_prompt(topic, granularity, context)
+            self.add_message("user", user_prompt)
+
+            # 延迟导入以避免循环依赖
+            from backend.ai.ai_proxy import call_llm as _call_llm
+
+            llm_result = await _call_llm(
+                system_prompt=self.system_prompt,
+                user_prompt=user_prompt,
+                model=self.model_id,
+                temperature=self.temperature,
+                purpose="report",
+            )
+
+            content = llm_result.get("content", "")
+            self.add_message("assistant", content)
+
+            # 若 LLM 返回空内容，使用模板兜底
+            if not content:
+                content = self._template_fallback(topic, granularity, context)
+
+            # 计算字数（中文按字符数）
+            word_count = len(content.replace(" ", "").replace("\n", ""))
+
+            return AgentResult(
+                agent_id=self.agent_id,
+                success=True,
+                content=content,
+                data={
+                    "content": content,
+                    "granularity": granularity,
+                    "word_count": word_count,
+                    "topic": topic,
+                },
+                token_usage={
+                    "prompt_tokens": llm_result.get("prompt_tokens", 0),
+                    "completion_tokens": llm_result.get("completion_tokens", 0),
+                    "total_tokens": llm_result.get("total_tokens", 0),
+                },
+            )
+        except Exception as e:
+            # 失败时使用模板兜底
+            content = self._template_fallback(topic, granularity, context)
+            word_count = len(content.replace(" ", "").replace("\n", "")) if content else 0
+            return AgentResult(
+                agent_id=self.agent_id,
+                success=False,
+                error=f"内容生成失败: {e}",
+                content=content,
+                data={
+                    "content": content,
+                    "granularity": granularity,
+                    "word_count": word_count,
+                    "topic": topic,
+                },
+            )
+
+    @staticmethod
+    def _build_user_prompt(topic: str, granularity: str, context: dict) -> str:
+        """构建 LLM 用户提示
+
+        Args:
+            topic: 论题标题。
+            granularity: 生成粒度。
+            context: 上下文字典。
+
+        Returns:
+            用户提示字符串。
+        """
+        # 文献摘要
+        search_feeds = context.get("search_feeds", []) or []
+        feeds_text = ""
+        if search_feeds:
+            feed_lines = []
+            for i, p in enumerate(search_feeds[:5], 1):
+                title = p.get("title", "") if isinstance(p, dict) else str(p)
+                year = p.get("year", "") if isinstance(p, dict) else ""
+                feed_lines.append(f"{i}. [{year}] {title}")
+            feeds_text = "\n".join(feed_lines)
+
+        # 评估信息
+        evaluation = context.get("evaluation", {}) or {}
+        eval_text = ""
+        eval_list = evaluation.get("evaluations", []) if isinstance(evaluation, dict) else []
+        if eval_list:
+            first = eval_list[0] if isinstance(eval_list[0], dict) else {}
+            eval_text = (
+                f"评分：{first.get('score', 'N/A')}\n"
+                f"问题：{first.get('issues', [])}\n"
+                f"建议：{first.get('suggestions', [])}"
+            )
+
+        granularity_desc = {
+            "title": "仅生成论题标题（限 20 字内名词性短语）",
+            "abstract": "生成 200-300 字摘要",
+            "outline": "生成开题报告大纲",
+            "full": "生成完整 Markdown 开题报告",
+        }.get(granularity, "生成开题报告大纲")
+
+        return (
+            f"论题：{topic}\n"
+            f"生成粒度：{granularity_desc}\n\n"
+            f"{('相关文献：\n' + feeds_text + '\n') if feeds_text else ''}"
+            f"{('评估信息：\n' + eval_text + '\n') if eval_text else ''}"
+            f"请按指定粒度生成内容，输出 Markdown 格式。"
+        )
+
+    @staticmethod
+    def _template_fallback(topic: str, granularity: str, context: dict) -> str:
+        """模板兜底生成（LLM 不可用时）
+
+        Args:
+            topic: 论题标题。
+            granularity: 生成粒度。
+            context: 上下文字典。
+
+        Returns:
+            兜底生成的内容字符串。
+        """
+        if granularity == "title":
+            return topic
+
+        if granularity == "abstract":
+            return (
+                f"本文围绕《{topic}》展开研究。"
+                f"基于现有文献综述与问题分析，"
+                f"探讨该方向的核心问题与解决路径，"
+                f"提出具有创新性的研究思路。"
+                f"本研究对相关领域具有一定的理论价值与实践意义。"
+            )
+
+        if granularity == "outline":
+            return (
+                f"# 开题报告大纲：{topic}\n\n"
+                f"## 一、选题依据\n"
+                f"- 问题意识\n"
+                f"- 研究意义\n\n"
+                f"## 二、国内外研究现状\n"
+                f"- 文献综述\n"
+                f"- 差异化与创新点\n\n"
+                f"## 三、研究内容\n"
+                f"- 研究目标\n"
+                f"- 研究方法\n"
+                f"- 技术路线\n\n"
+                f"## 四、进度安排\n"
+                f"- 阶段划分\n\n"
+                f"## 五、参考文献\n"
+            )
+
+        # full
+        return (
+            f"# 开题报告\n\n"
+            f"## 基本信息\n\n"
+            f"- **论题标题**：{topic}\n\n"
+            f"## 一、选题依据\n\n"
+            f"（待补充）\n\n"
+            f"## 二、国内外研究现状\n\n"
+            f"（待补充）\n\n"
+            f"## 三、研究内容\n\n"
+            f"（待补充）\n\n"
+            f"## 四、技术路线与可行性分析\n\n"
+            f"（待补充）\n\n"
+            f"## 五、进度安排\n\n"
+            f"（待补充）\n\n"
+            f"---\n\n"
+            f"*本报告由 ThesisMiner v8.0 兜底生成*"
+        )

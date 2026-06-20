@@ -1,0 +1,692 @@
+# =============================================================================
+# ThesisMiner v8.0 监控配置文件
+# =============================================================================
+# 本文件定义 ThesisMiner 系统的监控、告警与可观测性配置，包括：
+#   - 监控总开关与采集配置
+#   - 系统指标（CPU/内存/磁盘/网络）
+#   - 应用指标（请求量/响应时间/错误率/并发数）
+#   - 业务指标（会话数/论题生成数/查重数/模型调用量）
+#   - 模型调用指标（各模型的调用量/延迟/成本/错误率）
+#   - 告警规则（阈值告警/异常检测/组合告警）
+#   - 告警通知渠道（邮件/Webhook/钉钉/企业微信）
+#   - 健康检查（数据库/缓存/磁盘/内存/API 端点）
+#   - 日志收集（应用日志/访问日志/错误日志/审计日志）
+#   - Prometheus 指标导出配置
+#   - 分布式追踪配置
+#   - 仪表盘配置
+#
+# 所有敏感配置（密码/Token）应通过环境变量注入
+# =============================================================================
+
+# ===== 监控总配置 =====
+monitoring:
+  enabled: true
+  # 采集间隔（秒）
+  collect_interval: 15
+  # 指标保留天数
+  retention_days: 30
+  # 是否启用详细模式
+  verbose: false
+
+# ===== 系统指标 =====
+system_metrics:
+  # CPU 监控
+  cpu:
+    enabled: true
+    # 告警阈值（百分比）
+    warning_threshold: 70
+    critical_threshold: 90
+    # 采集间隔（秒）
+    interval: 5
+    metrics:
+      - "cpu_usage_percent"
+      - "cpu_load_avg_1m"
+      - "cpu_load_avg_5m"
+      - "cpu_load_avg_15m"
+      - "cpu_core_count"
+
+  # 内存监控
+  memory:
+    enabled: true
+    warning_threshold: 75
+    critical_threshold: 90
+    interval: 5
+    metrics:
+      - "memory_usage_percent"
+      - "memory_used_mb"
+      - "memory_total_mb"
+      - "memory_available_mb"
+      - "swap_usage_percent"
+
+  # 磁盘监控
+  disk:
+    enabled: true
+    warning_threshold: 80
+    critical_threshold: 95
+    interval: 60
+    monitored_paths:
+      - path: "/"
+        label: "system"
+      - path: "data/"
+        label: "data"
+      - path: "logs/"
+        label: "logs"
+    metrics:
+      - "disk_usage_percent"
+      - "disk_used_gb"
+      - "disk_total_gb"
+      - "disk_free_gb"
+      - "disk_io_read_mbps"
+      - "disk_io_write_mbps"
+
+  # 网络监控
+  network:
+    enabled: true
+    interval: 10
+    metrics:
+      - "network_rx_mbps"
+      - "network_tx_mbps"
+      - "network_connections_active"
+      - "network_connections_waiting"
+      - "network_packets_dropped"
+
+  # 进程监控
+  process:
+    enabled: true
+    interval: 10
+    metrics:
+      - "process_cpu_percent"
+      - "process_memory_mb"
+      - "process_threads"
+      - "process_open_files"
+      - "process_uptime_seconds"
+
+# ===== 应用指标 =====
+application_metrics:
+  # HTTP 请求指标
+  http:
+    enabled: true
+    metrics:
+      - name: "http_requests_total"
+        type: "counter"
+        description: "HTTP 请求总数"
+        labels: ["method", "endpoint", "status"]
+      - name: "http_request_duration_seconds"
+        type: "histogram"
+        description: "HTTP 请求耗时"
+        labels: ["method", "endpoint"]
+        buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+      - name: "http_requests_in_progress"
+        type: "gauge"
+        description: "处理中的 HTTP 请求数"
+      - name: "http_response_size_bytes"
+        type: "histogram"
+        description: "HTTP 响应大小"
+        buckets: [1024, 10240, 102400, 1048576, 10485760]
+
+  # API 端点指标
+  api_endpoints:
+    - path: "/api/v8/topics/generate"
+      sla_ms: 30000
+      error_rate_threshold: 0.05
+    - path: "/api/v8/search"
+      sla_ms: 10000
+      error_rate_threshold: 0.03
+    - path: "/api/v8/validate"
+      sla_ms: 15000
+      error_rate_threshold: 0.02
+    - path: "/api/v8/stream"
+      sla_ms: 60000
+      error_rate_threshold: 0.01
+    - path: "/api/v8/health"
+      sla_ms: 100
+      error_rate_threshold: 0.0
+
+  # 数据库指标
+  database:
+    enabled: true
+    metrics:
+      - name: "db_connections_active"
+        type: "gauge"
+        description: "活跃数据库连接数"
+      - name: "db_query_duration_seconds"
+        type: "histogram"
+        description: "数据库查询耗时"
+        buckets: [0.001, 0.01, 0.1, 0.5, 1.0, 5.0]
+      - name: "db_queries_total"
+        type: "counter"
+        description: "数据库查询总数"
+        labels: ["operation", "table"]
+      - name: "db_errors_total"
+        type: "counter"
+        description: "数据库错误总数"
+
+  # 缓存指标
+  cache:
+    enabled: true
+    metrics:
+      - name: "cache_hits_total"
+        type: "counter"
+        description: "缓存命中总数"
+        labels: ["namespace"]
+      - name: "cache_misses_total"
+        type: "counter"
+        description: "缓存未命中总数"
+        labels: ["namespace"]
+      - name: "cache_size"
+        type: "gauge"
+        description: "缓存大小"
+        labels: ["namespace"]
+      - name: "cache_evictions_total"
+        type: "counter"
+        description: "缓存淘汰总数"
+
+# ===== 业务指标 =====
+business_metrics:
+  # 会话指标
+  sessions:
+    enabled: true
+    metrics:
+      - name: "sessions_active"
+        type: "gauge"
+        description: "活跃会话数"
+      - name: "sessions_created_total"
+        type: "counter"
+        description: "创建的会话总数"
+      - name: "session_duration_seconds"
+        type: "histogram"
+        description: "会话持续时间"
+        buckets: [60, 300, 600, 1800, 3600, 7200]
+      - name: "session_messages_total"
+        type: "counter"
+        description: "会话消息总数"
+
+  # 论题生成指标
+  topic_generation:
+    enabled: true
+    metrics:
+      - name: "topics_generated_total"
+        type: "counter"
+        description: "生成的论题总数"
+        labels: ["degree", "discipline"]
+      - name: "topic_generation_duration_seconds"
+        type: "histogram"
+        description: "论题生成耗时"
+        buckets: [1, 5, 10, 30, 60, 120]
+      - name: "topic_candidates_per_session"
+        type: "histogram"
+        description: "每会话候选论题数"
+        buckets: [1, 3, 5, 8, 10, 15]
+      - name: "topic_selected_rate"
+        type: "gauge"
+        description: "论题选中率"
+
+  # 查重指标
+  plagiarism_check:
+    enabled: true
+    metrics:
+      - name: "plagiarism_checks_total"
+        type: "counter"
+        description: "查重检查总数"
+      - name: "plagiarism_similarity_score"
+        type: "histogram"
+        description: "查重相似度分数"
+        buckets: [0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
+      - name: "plagiarism_check_duration_seconds"
+        type: "histogram"
+        description: "查重耗时"
+        buckets: [1, 5, 10, 30, 60]
+
+  # 管道执行指标
+  pipeline:
+    enabled: true
+    metrics:
+      - name: "pipeline_executions_total"
+        type: "counter"
+        description: "管道执行总数"
+        labels: ["pipeline_name", "status"]
+      - name: "pipeline_duration_seconds"
+        type: "histogram"
+        description: "管道执行耗时"
+        labels: ["pipeline_name"]
+        buckets: [1, 5, 10, 30, 60, 120, 300]
+      - name: "pipeline_stage_duration_seconds"
+        type: "histogram"
+        description: "管道阶段耗时"
+        labels: ["pipeline_name", "stage_name"]
+        buckets: [0.1, 0.5, 1, 5, 10, 30]
+      - name: "pipeline_stage_failures_total"
+        type: "counter"
+        description: "管道阶段失败总数"
+        labels: ["pipeline_name", "stage_name"]
+
+  # 调度器指标
+  scheduler:
+    enabled: true
+    metrics:
+      - name: "scheduler_tasks_submitted_total"
+        type: "counter"
+        description: "提交的任务总数"
+      - name: "scheduler_tasks_completed_total"
+        type: "counter"
+        description: "完成的任务总数"
+        labels: ["status"]
+      - name: "scheduler_queue_size"
+        type: "gauge"
+        description: "调度器队列大小"
+      - name: "scheduler_active_workers"
+        type: "gauge"
+        description: "活跃工作协程数"
+      - name: "scheduler_task_duration_seconds"
+        type: "histogram"
+        description: "任务执行耗时"
+        buckets: [0.1, 0.5, 1, 5, 10, 30, 60]
+
+# ===== 模型调用指标 =====
+model_metrics:
+  enabled: true
+  metrics:
+    - name: "model_calls_total"
+      type: "counter"
+      description: "模型调用总数"
+      labels: ["model_id", "agent_role", "status"]
+    - name: "model_call_duration_seconds"
+      type: "histogram"
+      description: "模型调用耗时"
+      labels: ["model_id"]
+      buckets: [0.5, 1, 2, 5, 10, 30, 60, 120]
+    - name: "model_tokens_input_total"
+      type: "counter"
+      description: "输入 Token 总数"
+      labels: ["model_id"]
+    - name: "model_tokens_output_total"
+      type: "counter"
+      description: "输出 Token 总数"
+      labels: ["model_id"]
+    - name: "model_cost_cny_total"
+      type: "counter"
+      description: "模型调用成本（元）"
+      labels: ["model_id"]
+    - name: "model_errors_total"
+      type: "counter"
+      description: "模型调用错误总数"
+      labels: ["model_id", "error_type"]
+    - name: "model_rate_limit_hits_total"
+      type: "counter"
+      description: "限流触发总数"
+      labels: ["model_id"]
+    - name: "model_fallback_total"
+      type: "counter"
+      description: "降级触发总数"
+      labels: ["from_model", "to_model"]
+
+# ===== 告警规则 =====
+alerts:
+  # 系统告警
+  system:
+    - name: "high_cpu_usage"
+      description: "CPU 使用率过高"
+      condition: "cpu_usage_percent > 90"
+      duration: 300  # 持续 5 分钟
+      severity: "critical"
+      tags: ["system", "cpu"]
+    - name: "high_memory_usage"
+      description: "内存使用率过高"
+      condition: "memory_usage_percent > 90"
+      duration: 300
+      severity: "critical"
+      tags: ["system", "memory"]
+    - name: "disk_space_low"
+      description: "磁盘空间不足"
+      condition: "disk_usage_percent > 95"
+      duration: 60
+      severity: "critical"
+      tags: ["system", "disk"]
+    - name: "high_load_average"
+      description: "系统负载过高"
+      condition: "cpu_load_avg_5m > 10"
+      duration: 300
+      severity: "warning"
+      tags: ["system", "load"]
+
+  # 应用告警
+  application:
+    - name: "high_error_rate"
+      description: "错误率过高"
+      condition: "error_rate > 0.05"
+      duration: 60
+      severity: "critical"
+      tags: ["app", "errors"]
+    - name: "slow_response"
+      description: "响应时间过长"
+      condition: "p95_response_time > 10"
+      duration: 120
+      severity: "warning"
+      tags: ["app", "latency"]
+    - name: "db_connection_pool_exhausted"
+      description: "数据库连接池耗尽"
+      condition: "db_connections_active > 18"
+      duration: 60
+      severity: "critical"
+      tags: ["db", "connections"]
+    - name: "cache_hit_rate_low"
+      description: "缓存命中率过低"
+      condition: "cache_hit_rate < 0.3"
+      duration: 600
+      severity: "warning"
+      tags: ["cache"]
+
+  # 模型告警
+  model:
+    - name: "model_error_rate_high"
+      description: "模型错误率过高"
+      condition: "model_error_rate > 0.1"
+      duration: 300
+      severity: "critical"
+      tags: ["model", "errors"]
+    - name: "model_cost_exceeded"
+      description: "模型成本超限"
+      condition: "daily_cost > 200"
+      duration: 0
+      severity: "warning"
+      tags: ["model", "cost"]
+    - name: "model_rate_limit_frequent"
+      description: "频繁触发限流"
+      condition: "rate_limit_hits > 50"
+      duration: 300
+      severity: "warning"
+      tags: ["model", "rate_limit"]
+    - name: "model_frequent_fallback"
+      description: "频繁降级"
+      condition: "fallback_count > 20"
+      duration: 300
+      severity: "warning"
+      tags: ["model", "fallback"]
+
+  # 业务告警
+  business:
+    - name: "session_creation_spike"
+      description: "会话创建激增"
+      condition: "session_creation_rate > 100"
+      duration: 60
+      severity: "warning"
+      tags: ["business", "sessions"]
+    - name: "pipeline_failure_rate_high"
+      description: "管道失败率过高"
+      condition: "pipeline_failure_rate > 0.1"
+      duration: 300
+      severity: "critical"
+      tags: ["business", "pipeline"]
+    - name: "scheduler_queue_backlog"
+      description: "调度器队列积压"
+      condition: "queue_size > 1000"
+      duration: 120
+      severity: "warning"
+      tags: ["business", "scheduler"]
+
+# ===== 告警通知 =====
+notifications:
+  # 邮件通知
+  email:
+    enabled: true
+    smtp_host: "${SMTP_HOST}"
+    smtp_port: 587
+    smtp_user: "${SMTP_USER}"
+    smtp_password: "${SMTP_PASSWORD}"
+    from_addr: "alerts@thesisminer.ai"
+    to_addrs:
+      - "admin@thesisminer.ai"
+      - "ops@thesisminer.ai"
+    # 按严重级别发送
+    severity_filter: ["warning", "critical"]
+    # 抑制重复告警（秒）
+    suppression_time: 300
+
+  # Webhook 通知
+  webhook:
+    enabled: true
+    url: "${ALERT_WEBHOOK_URL}"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer ${ALERT_WEBHOOK_TOKEN}"
+    # 超时（秒）
+    timeout: 10
+    # 重试次数
+    retries: 3
+
+  # 钉钉通知
+  dingtalk:
+    enabled: false
+    webhook_url: "${DINGTALK_WEBHOOK_URL}"
+    secret: "${DINGTALK_SECRET}"
+    # @ 的用户手机号
+    at_mobiles: []
+    # @ 全体
+    at_all: false
+
+  # 企业微信通知
+  wechat:
+    enabled: false
+    webhook_url: "${WECHAT_WEBHOOK_URL}"
+    # @ 的用户 ID
+    mentioned_list: []
+    mentioned_mobile_list: []
+
+  # 告警分组
+  grouping:
+    # 按标签分组
+    by_labels: ["severity", "service"]
+    # 分组等待时间（秒）
+    group_wait: 30
+    # 分组间隔（秒）
+    group_interval: 300
+    # 重复间隔（秒）
+    repeat_interval: 3600
+
+# ===== 健康检查 =====
+health_checks:
+  # 检查间隔（秒）
+  interval: 30
+  # 检查超时（秒）
+  timeout: 5
+
+  # 检查项
+  checks:
+    - name: "database"
+      enabled: true
+      type: "sqlite"
+      description: "数据库连接检查"
+      query: "SELECT 1"
+      expected_result: 1
+      timeout: 3
+
+    - name: "cache"
+      enabled: true
+      type: "memory"
+      description: "缓存服务检查"
+      test_key: "__health_check__"
+      test_value: "ok"
+
+    - name: "disk_space"
+      enabled: true
+      type: "disk"
+      description: "磁盘空间检查"
+      path: "data/"
+      min_free_mb: 1000
+
+    - name: "memory"
+      enabled: true
+      type: "memory"
+      description: "内存使用检查"
+      max_usage_percent: 90
+
+    - name: "api_endpoint"
+      enabled: true
+      type: "http"
+      description: "API 端点检查"
+      url: "http://localhost:5000/api/v8/health"
+      expected_status: 200
+      timeout: 5
+
+    - name: "model_connectivity"
+      enabled: true
+      type: "model"
+      description: "模型连通性检查"
+      model_id: "deepseek-v3.2"
+      test_prompt: "ping"
+      timeout: 10
+
+# ===== 日志收集 =====
+log_collection:
+  enabled: true
+  # 日志文件路径
+  log_files:
+    - path: "logs/thesisminer.log"
+      labels:
+        service: "thesisminer"
+        level: "all"
+    - path: "logs/error.log"
+      labels:
+        service: "thesisminer"
+        level: "error"
+    - path: "logs/audit.log"
+      labels:
+        service: "thesisminer"
+        type: "audit"
+
+  # 日志解析
+  parsing:
+    format: "json"
+    # 时间字段
+    timestamp_field: "timestamp"
+    # 级别字段
+    level_field: "level"
+    # 消息字段
+    message_field: "message"
+
+  # 日志索引
+  indexing:
+    # 索引保留天数
+    retention_days: 30
+    # 索引大小上限（MB）
+    max_size_mb: 5000
+
+# ===== Prometheus 导出 =====
+prometheus:
+  enabled: true
+  # 指标导出路径
+  metrics_path: "/metrics"
+  # 导出端口
+  port: 9090
+  # 采集间隔（秒）
+  scrape_interval: 15
+  # 采集超时（秒）
+  scrape_timeout: 10
+
+  # 自定义标签
+  labels:
+    app: "thesisminer"
+    version: "8.0.0"
+    environment: "production"
+
+  # 指标过滤
+  metric_filter:
+    # 包含的指标前缀
+    include_prefixes:
+      - "thesisminer_"
+      - "http_"
+      - "db_"
+      - "cache_"
+      - "model_"
+      - "pipeline_"
+      - "scheduler_"
+    # 排除的指标
+    exclude_metrics: []
+
+# ===== 分布式追踪 =====
+tracing:
+  enabled: false
+  # 追踪后端
+  backend: "jaeger"  # jaeger / zipkin / otel
+  # 采样率（0-1）
+  sampling_rate: 0.1
+  # Jaeger 配置
+  jaeger:
+    agent_host: "localhost"
+    agent_port: 6831
+  # 服务名称
+  service_name: "thesisminer"
+  # 追踪上下文传播
+  propagation: "b3"  # b3 / w3c
+
+# ===== 仪表盘配置 =====
+dashboards:
+  # 系统仪表盘
+  - name: "系统概览"
+    panels:
+      - title: "CPU 使用率"
+        metric: "cpu_usage_percent"
+        type: "gauge"
+      - title: "内存使用率"
+        metric: "memory_usage_percent"
+        type: "gauge"
+      - title: "磁盘使用率"
+        metric: "disk_usage_percent"
+        type: "gauge"
+      - title: "活跃连接数"
+        metric: "network_connections_active"
+        type: "counter"
+
+  # 应用仪表盘
+  - name: "应用监控"
+    panels:
+      - title: "请求量（每分钟）"
+        metric: "http_requests_total"
+        type: "rate"
+      - title: "响应时间 P95"
+        metric: "http_request_duration_seconds"
+        type: "histogram_quantile"
+        quantile: 0.95
+      - title: "错误率"
+        metric: "http_errors_total"
+        type: "rate"
+      - title: "活跃会话数"
+        metric: "sessions_active"
+        type: "gauge"
+
+  # 模型仪表盘
+  - name: "模型调用"
+    panels:
+      - title: "各模型调用量"
+        metric: "model_calls_total"
+        type: "counter"
+        group_by: "model_id"
+      - title: "各模型平均延迟"
+        metric: "model_call_duration_seconds"
+        type: "histogram_mean"
+        group_by: "model_id"
+      - title: "每日成本"
+        metric: "model_cost_cny_total"
+        type: "counter"
+        group_by: "model_id"
+      - title: "错误率"
+        metric: "model_errors_total"
+        type: "rate"
+        group_by: "model_id"
+
+  # 业务仪表盘
+  - name: "业务指标"
+    panels:
+      - title: "论题生成量"
+        metric: "topics_generated_total"
+        type: "counter"
+      - title: "查重检查量"
+        metric: "plagiarism_checks_total"
+        type: "counter"
+      - title: "管道执行量"
+        metric: "pipeline_executions_total"
+        type: "counter"
+      - title: "调度器队列大小"
+        metric: "scheduler_queue_size"
+        type: "gauge"

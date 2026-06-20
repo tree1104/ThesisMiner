@@ -1,12 +1,175 @@
 """编排流程状态机
 
-定义论题生成流程的状态枚举、上下文与状态机，
-串联前置检索、精炼、校验等钩子，编排完整流程。
+v7: 定义论题生成流程的状态枚举、上下文与状态机，
+    串联前置检索、精炼、校验等钩子，编排完整流程。
+v8.0: 新增五阶段闭环导航流状态机（Stage/Event/transition），
+      保持 v7 既有接口（OrchestrationContext/OrchestrationStateMachine）向后兼容。
 """
 from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
 
 
-# 状态枚举常量
+# ===== v8.0 五阶段状态枚举 =====
+class Stage(str, Enum):
+    """v8.0 五阶段状态枚举"""
+    INFO_CONFIRM = "info_confirm"
+    CREATIVITY = "creativity"
+    VALIDATION = "validation"
+    GENERATION = "generation"
+    DEEP_ASSIST = "deep_assist"
+
+
+# 事件枚举
+class Event(str, Enum):
+    """v8.0 状态机事件枚举"""
+    START = "start"
+    USER_CONFIRM = "user_confirm"
+    CANDIDATES_GENERATED = "candidates_generated"
+    EVALUATION_DONE = "evaluation_done"
+    SCORE_PASS = "score_pass"
+    SCORE_FAIL = "score_fail"
+    GENERATION_DONE = "generation_done"
+    ENTER_DEEP_ASSIST = "enter_deep_assist"
+    RESET = "reset"
+
+
+# 状态转移表
+TRANSITIONS = {
+    (Stage.INFO_CONFIRM, Event.USER_CONFIRM): Stage.CREATIVITY,
+    (Stage.CREATIVITY, Event.CANDIDATES_GENERATED): Stage.VALIDATION,
+    (Stage.VALIDATION, Event.SCORE_PASS): Stage.GENERATION,
+    (Stage.VALIDATION, Event.SCORE_FAIL): Stage.CREATIVITY,  # 回退
+    (Stage.GENERATION, Event.GENERATION_DONE): Stage.DEEP_ASSIST,
+    (Stage.DEEP_ASSIST, Event.RESET): Stage.INFO_CONFIRM,
+}
+
+
+@dataclass
+class TransitionResult:
+    """状态转移结果"""
+    success: bool
+    from_stage: Stage
+    to_stage: Stage
+    event: Event
+    message: str
+    is_retry: bool = False
+
+
+def transition(current_stage: Stage, event: Event) -> TransitionResult:
+    """执行状态转移
+
+    Args:
+        current_stage: 当前阶段
+        event: 触发事件
+
+    Returns:
+        TransitionResult: 转移结果
+    """
+    # 处理 RESET 事件
+    if event == Event.RESET:
+        return TransitionResult(
+            success=True,
+            from_stage=current_stage,
+            to_stage=Stage.INFO_CONFIRM,
+            event=event,
+            message="重置到信息确权阶段",
+        )
+
+    # 处理 START 事件
+    if event == Event.START and current_stage is None:
+        return TransitionResult(
+            success=True,
+            from_stage=None,
+            to_stage=Stage.INFO_CONFIRM,
+            event=event,
+            message="启动五阶段流程",
+        )
+
+    key = (current_stage, event)
+    if key not in TRANSITIONS:
+        return TransitionResult(
+            success=False,
+            from_stage=current_stage,
+            to_stage=current_stage,
+            event=event,
+            message=f"非法转移: {current_stage} + {event}",
+        )
+
+    to_stage = TRANSITIONS[key]
+    is_retry = (event == Event.SCORE_FAIL)
+
+    messages = {
+        (Stage.INFO_CONFIRM, Event.USER_CONFIRM): "用户确认，进入创意阶段",
+        (Stage.CREATIVITY, Event.CANDIDATES_GENERATED): "候选生成完成，进入校验阶段",
+        (Stage.VALIDATION, Event.SCORE_PASS): "评分通过，进入生成阶段",
+        (Stage.VALIDATION, Event.SCORE_FAIL): "评分不通过，回退到创意阶段",
+        (Stage.GENERATION, Event.GENERATION_DONE): "生成完成，进入深度辅助",
+        (Stage.DEEP_ASSIST, Event.RESET): "重置流程",
+    }
+
+    return TransitionResult(
+        success=True,
+        from_stage=current_stage,
+        to_stage=to_stage,
+        event=event,
+        message=messages.get(key, f"{current_stage} → {to_stage}"),
+        is_retry=is_retry,
+    )
+
+
+def get_next_events(current_stage: Stage) -> list[Event]:
+    """获取当前阶段可触发的事件列表"""
+    next_events = []
+    for (stage, event) in TRANSITIONS:
+        if stage == current_stage:
+            next_events.append(event)
+    return next_events
+
+
+def is_valid_transition(current_stage: Stage, event: Event) -> bool:
+    """检查转移是否合法"""
+    if event == Event.RESET:
+        return True
+    return (current_stage, event) in TRANSITIONS
+
+
+# ===== 向后兼容的旧版状态枚举与状态机 =====
+class State(str, Enum):
+    """旧版状态枚举（向后兼容）"""
+    INIT = "init"
+    SEARCHING = "searching"
+    REASONING = "reasoning"
+    PROPOSAL = "proposal"
+    DONE = "done"
+
+
+class StateMachine:
+    """旧版状态机（向后兼容 v7）
+
+    提供简化的线性状态推进接口，与 v7 既有 OrchestrationStateMachine 并存。
+    """
+
+    def __init__(self):
+        self.state = State.INIT
+
+    def advance(self) -> State:
+        """推进到下一状态"""
+        order = [State.INIT, State.SEARCHING, State.REASONING, State.PROPOSAL, State.DONE]
+        try:
+            idx = order.index(self.state)
+            if idx < len(order) - 1:
+                self.state = order[idx + 1]
+        except ValueError:
+            self.state = State.INIT
+        return self.state
+
+    def reset(self):
+        """重置到初始状态"""
+        self.state = State.INIT
+
+
+# ===== v7 既有状态常量（向后兼容） =====
 STATE_INIT = "init"
 STATE_INSPIRING = "inspiring"  # 创意发散
 STATE_REASONING = "reasoning"  # 精炼

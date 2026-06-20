@@ -1,0 +1,216 @@
+# ThesisMiner v8.0 新颖性评分权重配置
+# 版本：v8.0
+# 日期：2026-06-19
+# 适用范围：backend/constraints/novelty_checker.py、backend/agents/reasoner.py
+# 说明：基于 skillreadme.md 四维创意引擎定义，对候选论题进行多维度新颖性量化评估
+
+# 四维创意权重（总和 = 1.0）
+weights:
+  cross_discipline: 0.30        # 学科交叉维度权重（30%）
+  method_transfer: 0.25         # 方法迁移维度权重（25%）
+  pain_point_breakthrough: 0.25 # 痛点突破维度权重（25%）
+  trend_foresight: 0.20         # 趋势前瞻维度权重（20%）
+
+# 通过阈值
+thresholds:
+  total_score: 60               # 总分最低通过线（0-100）
+  dimension_score: 40           # 单维度最低分（任一维度低于此分则标记短板）
+  max_similarity: 0.3           # 与已有文献最大相似度（超过则降权）
+  min_candidates: 3             # 最少生成候选数（用于横向比较择优）
+  top_k_pass: 1                 # 取前 K 名进入校验阶段
+
+# 风险评级（基于相似度与新颖性综合判定）
+risk_levels:
+  low:
+    similarity_max: 0.3
+    novelty_min: 70
+    action: pass                # 直接通过
+    label: 低风险
+  medium:
+    similarity_max: 0.5
+    novelty_min: 60
+    action: downweight          # 降权，要求用户确认差异化方向
+    label: 中风险
+  high:
+    similarity_max: 1.0
+    novelty_min: 0
+    action: block               # 阻断，要求调整方向
+    label: 高风险
+
+# 维度一：学科交叉（cross_discipline）
+# 评估论题是否跨越两个及以上学科边界，产生交叉创新
+cross_discipline:
+  # 评分细则（0-100）
+  rubric:
+    90-100:
+      desc: 跨越 3 个及以上学科，形成全新交叉领域
+      example: 将神经科学、计算拓扑学、教育心理学三者融合研究学习认知机制
+    70-89:
+      desc: 跨越 2 个学科，在交叉点上有明确创新贡献
+      example: 将图神经网络迁移到蛋白质结构预测
+    50-69:
+      desc: 跨越 2 个学科，但交叉点创新性一般
+      example: 将传统统计方法用于新媒体传播分析
+    30-49:
+      desc: 学科边界模糊，交叉意图不明确
+      example: 仅在文献综述中提及多学科背景
+    0-29:
+      desc: 单一学科内部研究，无交叉
+      example: 纯算法优化类论题
+
+  # 加分项
+  bonuses:
+    rare_combination: 10        # 罕见学科组合（如艺术+量子计算）
+    methodological_bridge: 8    # 提供方法论桥梁（如将 A 学科实验范式引入 B）
+    theoretical_fusion: 12      # 理论层面深度融合（非简单借用）
+
+  # 扣分项
+  penalties:
+    superficial_mention: -15    # 仅在引言提及交叉，正文无落实
+    forced_combination: -20     # 强行拼凑无明显逻辑关联
+    overdone_combination: -10   # 交叉过多导致焦点涣散（>4 个学科）
+
+# 维度二：方法迁移（method_transfer）
+# 评估是否将 A 领域成熟方法迁移到 B 领域解决新问题
+method_transfer:
+  rubric:
+    90-100:
+      desc: 迁移方法与目标问题高度契合，且做了必要适配改进
+      example: 将 Transformer 注意力机制迁移到时间序列异常检测并改进位置编码
+    70-89:
+      desc: 方法迁移合理，有适配性调整但创新有限
+      example: 将 BERT 预训练范式迁移到代码理解任务
+    50-69:
+      desc: 方法迁移可行但适配不足，存在明显水土不服
+      example: 直接套用 NLP 方法到表格数据未做模态适配
+    30-49:
+      desc: 方法迁移牵强，迁移后效果存疑
+      example: 将图像卷积直接用于一维文本特征
+    0-29:
+      desc: 无方法迁移，或迁移后完全失效
+      example: 纯领域内方法应用
+
+  bonuses:
+    novel_adaptation: 10        # 迁移过程中有创新性适配改造
+    cross_modal: 12             # 跨模态迁移（视觉→文本、图→序列等）
+    efficiency_gain: 8          # 迁移后带来显著效率提升
+
+  penalties:
+    blind_copy: -25             # 无任何适配的机械搬运
+    domain_mismatch: -20        # 方法与目标领域假设严重冲突
+    redundant_transfer: -10     # 目标领域已有等效方法，迁移无增量价值
+
+# 维度三：痛点突破（pain_point_breakthrough）
+# 评估是否针对领域内公认痛点/瓶颈提出有效突破方案
+pain_point_breakthrough:
+  rubric:
+    90-100:
+      desc: 直击公认核心痛点，提出有理论支撑的突破方案
+      example: 针对大模型长上下文注意力计算复杂度二次增长提出线性化方案
+    70-89:
+      desc: 针对明确痛点提出改进，有实验验证有效性
+      example: 针对小样本学习过拟合问题提出元学习正则化
+    50-69:
+      desc: 触及痛点但突破力度有限，属渐进式改进
+      example: 对已有方法做超参调优与轻量改进
+    30-49:
+      desc: 痛点定位模糊，改进方向与痛点关联弱
+      example: 泛泛提及"效率问题"但未具体化
+    0-29:
+      desc: 未识别痛点，或痛点为伪需求
+      example: 解决领域内已基本解决的问题
+
+  bonuses:
+    long_standing: 10           # 针对长期未解难题（>5 年）
+    measurable_metric: 8        # 有可量化改进指标（如 F1 提升 X%）
+    theoretical_root: 12        # 从理论根因出发而非经验修补
+
+  penalties:
+    pseudo_pain: -30            # 伪痛点（领域内已基本解决）
+    incremental_only: -15       # 纯增量改进无实质突破
+    unsupported_claim: -20      # 突破声明无理论或实验支撑
+
+# 维度四：趋势前瞻（trend_foresight）
+# 评估论题是否前瞻性把握领域未来 2-3 年发展趋势
+trend_foresight:
+  rubric:
+    90-100:
+      desc: 前瞻性强，紧扣领域未来 2-3 年关键走向，有文献佐证
+      example: 在 2026 年预判多模态具身智能将成为下一代 AI 核心范式
+    70-89:
+      desc: 趋势把握准确，与近期热点演进方向一致
+      example: 围绕大模型推理能力增强开展研究
+    50-69:
+      desc: 趋势判断一般，属当前主流方向的延伸
+      example: 在已有 RAG 框架上做工程优化
+    30-49:
+      desc: 趋势判断滞后，研究的是 1-2 年前的热点
+      example: 2026 年仍以 BERT 微调为主线
+    0-29:
+      desc: 无前瞻性，方向过时或与趋势无关
+      example: 研究已被新范式取代的旧方法
+
+  bonuses:
+    emerging_field: 10          # 切入新兴子领域（文献量年增 >50%）
+    paradigm_shift: 15          # 预判范式转换
+    policy_aligned: 8           # 与国家/行业战略方向契合
+
+  penalties:
+    outdated: -25               # 方向明显过时
+    overhyped: -15              # 追逐已过热泡沫（文献增速放缓）
+    speculative: -20            # 过度 speculative 无任何文献支撑
+
+# 综合评分计算
+scoring:
+  # 加权求和公式
+  formula: "total = w1*d1 + w2*d2 + w3*d3 + w4*d4"
+  # 归一化（各维度 0-100，加权后仍为 0-100）
+  normalize: true
+  # 相似度惩罚（与已有文献相似度越高，总分折扣越大）
+  similarity_penalty:
+    enabled: true
+    formula: "final = total * (1 - max(0, similarity - 0.2))"  # 相似度 >0.2 开始惩罚
+  # 短板检测（任一维度低于 dimension_score 则标记）
+  shortboard_detection: true
+
+# 候选择优策略
+selection:
+  # 生成 N 个候选后取前 K 名
+  strategy: top_k
+  # 同分处理：优先级排序键
+  tiebreakers:
+    - cross_discipline          # 优先学科交叉分高者
+    - pain_point_breakthrough   # 其次痛点突破分高者
+    - trend_foresight           # 再次趋势前瞻分高者
+    - method_transfer           # 最后方法迁移分高者
+  # 输出结构
+  output_fields:
+    - candidate_id
+    - title
+    - dimensions: [cross_discipline, method_transfer, pain_point_breakthrough, trend_foresight]
+    - total_score
+    - final_score
+    - similarity
+    - risk_level
+    - shortboards
+    - bonuses_applied
+    - penalties_applied
+
+# 与硬约束的联动
+hard_rule_linkage:
+  # 新颖性评分 < 60 触发硬约束 duplication_threshold
+  min_novelty_for_pass: 60
+  # 相似度 > 0.3 触发硬约束阻断
+  max_similarity_for_pass: 0.3
+  # 评分不达标时回退到创意阶段重新生成
+  on_fail: retry_creativity_stage
+  # 最大重试次数
+  max_retries: 3
+
+# 元数据
+metadata:
+  version: v8.0
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  reference: skillreadme.md 四维创意引擎章节

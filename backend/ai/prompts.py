@@ -205,3 +205,65 @@ def compute_prefix_hash(base: str, profile: str) -> str:
     """
     combined = base + "\n" + profile
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
+
+
+# =============================================================================
+# 三段式 Prompt 缓存构建器（Task 2.2）
+# 将系统角色 + 硬约束 + 学位/学科/导师信息拼接为不可变前缀，
+# 仅尾部动态变化，确保 DeepSeek 缓存命中率 ≥95%。
+# =============================================================================
+
+
+def build_prompt_with_cache(
+    system_role: str,
+    hard_constraints: list[str],
+    degree: str,
+    discipline: str,
+    advisor: str,
+    dynamic_content: str,
+) -> dict:
+    """构建带缓存前缀的三段式 Prompt（Task 2.2）。
+
+    将系统角色 + 硬约束 + 学位/学科/导师信息拼接为不可变前缀，
+    仅尾部 dynamic_content 变化，确保同会话内 DeepSeek 缓存命中。
+
+    Args:
+        system_role: 系统角色描述（如"你是论文选题专家"）。
+        hard_constraints: 硬约束列表（如["标题≤25字", "硕士1年内"]）。
+        degree: 学位（master/doctor）。
+        discipline: 学科领域。
+        advisor: 导师方向。
+        dynamic_content: 动态尾部文本（每轮变化）。
+
+    Returns:
+        包含 prefix / prefix_messages / dynamic / dynamic_messages 的字典：
+            - prefix: 不可变前缀文本
+            - prefix_messages: 不可变前缀消息列表（用于 messages 数组）
+            - dynamic: 动态尾部文本
+            - dynamic_messages: 动态尾部消息列表
+    """
+    # 构建固定前缀文本
+    prefix_parts = [f"[SYSTEM_ROLE]\n{system_role}\n"]
+    if hard_constraints:
+        prefix_parts.append("[HARD_CONSTRAINTS]")
+        for i, c in enumerate(hard_constraints, 1):
+            prefix_parts.append(f"{i}. {c}")
+        prefix_parts.append("")
+    if degree or discipline or advisor:
+        prefix_parts.append("[ACADEMIC_CONTEXT]")
+        if degree:
+            prefix_parts.append(f"学位: {degree}")
+        if discipline:
+            prefix_parts.append(f"学科: {discipline}")
+        if advisor:
+            prefix_parts.append(f"导师方向: {advisor}")
+        prefix_parts.append("")
+
+    prefix_text = "\n".join(prefix_parts)
+
+    return {
+        "prefix": prefix_text,
+        "prefix_messages": [{"role": "system", "content": prefix_text}],
+        "dynamic": dynamic_content,
+        "dynamic_messages": [{"role": "user", "content": dynamic_content}],
+    }
