@@ -1,0 +1,1404 @@
+openapi: 3.0.3
+info:
+  title: ThesisMiner API
+  version: 8.0.0
+  description: |
+    ThesisMiner v8.0 多智能体协作架构 API 文档。
+
+    包含会话管理、对话管理、消息管理、引用管理、Agent 管理、
+    缓存统计、谱系管理、创意引擎、论题生成、约束校验、预算控制等模块。
+
+    统一前缀：/api
+    返回格式：JSON
+    字符编码：UTF-8
+  contact:
+    name: ThesisMiner 团队
+    url: https://github.com/thesisminer
+  license:
+    name: MIT
+
+servers:
+  - url: http://127.0.0.1:8000
+    description: 开发环境
+  - url: https://api.thesisminer.com
+    description: 生产环境
+
+tags:
+  - name: 配置与状态
+    description: 系统配置与健康状态端点
+  - name: 会话管理
+    description: 会话 CRUD 与状态管理
+  - name: 对话管理
+    description: 多对话线程管理（v8.0 新增）
+  - name: 消息管理
+    description: 消息 CRUD 与引用管理（v8.0 新增）
+  - name: Agent 管理
+    description: Agent 元数据与流式编排（v8.0 新增）
+  - name: 缓存统计
+    description: DeepSeek KV Cache 命中率监控（v8.0 新增）
+  - name: 谱系管理
+    description: 学术谱系图管理
+  - name: 创意引擎
+    description: 四维创意生成
+  - name: 论题生成
+    description: 论题提案生成与开题报告
+  - name: 约束校验
+    description: 硬约束校验与文献检索
+  - name: 预算控制
+    description: 透明账本与费用统计
+
+paths:
+  # ===== 配置与状态 =====
+  /api/status:
+    get:
+      tags: [配置与状态]
+      summary: 获取服务健康状态
+      description: 返回服务健康状态、版本、AI 配置状态
+      responses:
+        '200':
+          description: 服务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatus'
+
+  /api/config:
+    get:
+      tags: [配置与状态]
+      summary: 获取当前配置
+      description: 返回当前配置（隐藏 api_key，仅显示是否已配置）
+      responses:
+        '200':
+          description: 当前配置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+    post:
+      tags: [配置与状态]
+      summary: 更新配置
+      description: 更新配置并持久化到 data/config.json
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdate'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/models:
+    get:
+      tags: [配置与状态]
+      summary: 获取多模型注册表
+      responses:
+        '200':
+          description: 模型列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelList'
+    post:
+      tags: [配置与状态]
+      summary: 新增模型
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelConfig'
+      responses:
+        '200':
+          description: 新增成功
+
+  /api/models/{model_id}:
+    put:
+      tags: [配置与状态]
+      summary: 更新模型配置
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelConfig'
+      responses:
+        '200':
+          description: 更新成功
+    delete:
+      tags: [配置与状态]
+      summary: 删除模型
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+        '409':
+          description: 模型被步骤路由使用，拒绝删除
+
+  /api/step-models:
+    get:
+      tags: [配置与状态]
+      summary: 获取步骤路由配置
+      responses:
+        '200':
+          description: 步骤路由
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  step_models:
+                    type: object
+    put:
+      tags: [配置与状态]
+      summary: 更新步骤路由配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                step_models:
+                  type: object
+      responses:
+        '200':
+          description: 更新成功
+
+  /api/currency:
+    put:
+      tags: [配置与状态]
+      summary: 切换计价货币
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                currency:
+                  type: string
+                  enum: [CNY, USD]
+      responses:
+        '200':
+          description: 切换成功
+        '400':
+          description: 非法货币值
+
+  # ===== 会话管理 =====
+  /api/sessions:
+    get:
+      tags: [会话管理]
+      summary: 分页查询会话列表
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionList'
+    post:
+      tags: [会话管理]
+      summary: 创建新会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionCreate'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  /api/sessions/{session_id}:
+    get:
+      tags: [会话管理]
+      summary: 获取会话详情
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 会话详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404':
+          description: 会话不存在
+    delete:
+      tags: [会话管理]
+      summary: 删除会话（级联删除对话与消息）
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/sessions/{session_id}/status:
+    patch:
+      tags: [会话管理]
+      summary: 更新会话状态
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [active, closed, completed]
+      responses:
+        '200':
+          description: 更新成功
+
+  # ===== 对话管理（v8.0 新增）=====
+  /api/conversations:
+    get:
+      tags: [对话管理]
+      summary: 分页查询对话列表
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: 对话列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationList'
+    post:
+      tags: [对话管理]
+      summary: 创建新对话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationCreate'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+
+  /api/conversations/{conversation_id}:
+    get:
+      tags: [对话管理]
+      summary: 获取对话详情
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 对话详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '404':
+          description: 对话不存在
+    delete:
+      tags: [对话管理]
+      summary: 删除对话（级联删除消息）
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+
+  # ===== 消息管理（v8.0 新增）=====
+  /api/messages:
+    get:
+      tags: [消息管理]
+      summary: 分页查询消息列表
+      parameters:
+        - name: conversation_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: 消息列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageList'
+    post:
+      tags: [消息管理]
+      summary: 创建新消息
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageCreate'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+  /api/messages/{message_id}/citations:
+    get:
+      tags: [消息管理]
+      summary: 获取消息关联的引用
+      parameters:
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 引用列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitationList'
+
+  # ===== Agent 管理（v8.0 新增）=====
+  /api/agents:
+    get:
+      tags: [Agent 管理]
+      summary: 获取所有 Agent 元数据
+      responses:
+        '200':
+          description: Agent 列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentList'
+
+  /api/agents/{agent_id}:
+    get:
+      tags: [Agent 管理]
+      summary: 获取指定 Agent 元数据
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [orchestrator, searcher, reasoner, critic, mentor, writer]
+      responses:
+        '200':
+          description: Agent 元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentMetadata'
+        '404':
+          description: Agent 不存在
+
+  /api/agents/orchestrate:
+    post:
+      tags: [Agent 管理]
+      summary: 流式编排端点（SSE）
+      description: |
+        启动五阶段闭环导航流，通过 SSE 实时推送各 Agent 的中间结果。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestrateRequest'
+      responses:
+        '200':
+          description: SSE 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE 事件流
+
+  # ===== 缓存统计（v8.0 新增）=====
+  /api/cache-stats:
+    get:
+      tags: [缓存统计]
+      summary: 获取缓存命中率统计
+      parameters:
+        - name: session_id
+          in: query
+          schema:
+            type: string
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 缓存统计
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStats'
+
+  # ===== 谱系管理 =====
+  /api/lineage:
+    get:
+      tags: [谱系管理]
+      summary: 列出谱系节点
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: 谱系节点列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineageNodeList'
+
+  /api/lineage/import:
+    post:
+      tags: [谱系管理]
+      summary: 批量导入谱系节点与边
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LineageImport'
+      responses:
+        '200':
+          description: 导入成功
+
+  /api/lineage/graph:
+    get:
+      tags: [谱系管理]
+      summary: 获取完整图谱
+      responses:
+        '200':
+          description: 图谱数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineageGraph'
+
+  /api/lineage/search:
+    get:
+      tags: [谱系管理]
+      summary: 按关键词搜索节点
+      parameters:
+        - name: keyword
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 搜索结果
+
+  /api/lineage/batch:
+    delete:
+      tags: [谱系管理]
+      summary: 批量删除节点
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                node_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/lineage/{node_id}:
+    delete:
+      tags: [谱系管理]
+      summary: 删除指定节点
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/lineage/cards:
+    get:
+      tags: [谱系管理]
+      summary: 列出知识卡片
+      parameters:
+        - name: tag
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 知识卡片列表
+    post:
+      tags: [谱系管理]
+      summary: 新增知识卡片
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                source:
+                  type: string
+      responses:
+        '200':
+          description: 新增成功
+
+  # ===== 创意引擎 =====
+  /api/creativity/inspire:
+    post:
+      tags: [创意引擎]
+      summary: 激发创意候选
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspireRequest'
+      responses:
+        '200':
+          description: 创意候选列表
+
+  /api/creativity/cross-domain:
+    post:
+      tags: [创意引擎]
+      summary: 跨域联想
+      responses:
+        '200':
+          description: 跨域联想结果
+
+  /api/creativity/trend-graft:
+    post:
+      tags: [创意引擎]
+      summary: 趋势嫁接
+      responses:
+        '200':
+          description: 趋势嫁接结果
+
+  /api/creativity/rank:
+    post:
+      tags: [创意引擎]
+      summary: 候选排序
+      responses:
+        '200':
+          description: 排序结果
+
+  /api/creativity/candidates:
+    get:
+      tags: [创意引擎]
+      summary: 获取示例候选
+      parameters:
+        - name: degree
+          in: query
+          schema:
+            type: string
+        - name: discipline
+          in: query
+          schema:
+            type: string
+        - name: mentor_info
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 示例候选
+
+  # ===== 论题生成 =====
+  /api/proposals/generate:
+    post:
+      tags: [论题生成]
+      summary: 生成论题提案
+      description: |
+        未配置 API Key 时返回 400；硬约束不合规返回 422。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposalGenerateRequest'
+      responses:
+        '200':
+          description: 论题提案列表
+        '400':
+          description: AI API Key 未配置
+        '422':
+          description: 硬约束不合规
+
+  /api/proposals:
+    get:
+      tags: [论题生成]
+      summary: 分页查询论题列表
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: session_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 论题列表
+
+  /api/proposals/{proposal_id}:
+    get:
+      tags: [论题生成]
+      summary: 获取论题详情
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 论题详情
+        '404':
+          description: 论题不存在
+    delete:
+      tags: [论题生成]
+      summary: 删除论题
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除成功
+
+  /api/proposals/{proposal_id}/report:
+    post:
+      tags: [论题生成]
+      summary: 生成开题报告
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: use_ai
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: 开题报告
+        '404':
+          description: 论题不存在
+
+  # ===== 约束校验 =====
+  /api/constraints/validate-title:
+    post:
+      tags: [约束校验]
+      summary: 校验标题格式并自动重写
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                degree:
+                  type: string
+      responses:
+        '200':
+          description: 校验结果
+
+  /api/constraints/check-feasibility:
+    post:
+      tags: [约束校验]
+      summary: 校验研究周期可行性
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                degree:
+                  type: string
+                timeframe_months:
+                  type: integer
+      responses:
+        '200':
+          description: 可行性结果
+
+  /api/constraints/check-literature:
+    post:
+      tags: [约束校验]
+      summary: 校验文献数量基线
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                degree:
+                  type: string
+                count:
+                  type: integer
+      responses:
+        '200':
+          description: 校验结果
+
+  /api/constraints/calendar/{degree}:
+    get:
+      tags: [约束校验]
+      summary: 获取学术日历
+      parameters:
+        - name: degree
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 学术日历
+
+  /api/constraints/baseline/{degree}:
+    get:
+      tags: [约束校验]
+      summary: 获取文献基线
+      parameters:
+        - name: degree
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 文献基线
+
+  /api/constraints/search-literature:
+    post:
+      tags: [约束校验]
+      summary: 真实文献检索
+      description: 5 秒超时自动降级模拟检索
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                time_window:
+                  type: string
+      responses:
+        '200':
+          description: 检索结果
+
+  /api/constraints/search-status:
+    get:
+      tags: [约束校验]
+      summary: 查询文献检索配置状态
+      responses:
+        '200':
+          description: 检索状态
+
+  # ===== 预算控制 =====
+  /api/budgets/ledger:
+    get:
+      tags: [预算控制]
+      summary: 获取账本明细
+      parameters:
+        - name: session_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 账本明细
+
+  /api/budgets/estimate:
+    post:
+      tags: [预算控制]
+      summary: 估算会话级预算
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                degree:
+                  type: string
+                mode:
+                  type: string
+                count:
+                  type: integer
+      responses:
+        '200':
+          description: 预算估算
+
+  /api/budgets/summary:
+    get:
+      tags: [预算控制]
+      summary: 获取账本汇总统计
+      responses:
+        '200':
+          description: 汇总统计
+
+  /api/budgets/session/{session_id}:
+    get:
+      tags: [预算控制]
+      summary: 获取指定会话的费用统计
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 会话费用统计
+
+  /api/budgets/pricing:
+    get:
+      tags: [预算控制]
+      summary: 获取模型定价表
+      responses:
+        '200':
+          description: 定价表
+
+components:
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+        error:
+          type: string
+
+    ServiceStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        version:
+          type: string
+        rag_enabled:
+          type: boolean
+        ai_configured:
+          type: boolean
+
+    Config:
+      type: object
+      properties:
+        ai_api_key_configured:
+          type: boolean
+        ai_base_url:
+          type: string
+        ai_model:
+          type: string
+        degree_models:
+          type: object
+        literature_baseline:
+          type: object
+        academic_calendar:
+          type: object
+
+    ConfigUpdate:
+      type: object
+      properties:
+        ai_api_key:
+          type: string
+        ai_base_url:
+          type: string
+        ai_model:
+          type: string
+
+    ModelConfig:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        base_url:
+          type: string
+        pricing:
+          type: object
+        supports_streaming:
+          type: boolean
+        supports_thinking:
+          type: boolean
+        supports_web_search:
+          type: boolean
+        max_context:
+          type: integer
+        default_temperature:
+          type: number
+
+    ModelList:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelConfig'
+        count:
+          type: integer
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        degree:
+          type: string
+        discipline:
+          type: string
+        mentor_info:
+          type: string
+        status:
+          type: string
+        dialog_rounds:
+          type: integer
+        cache_prefix_hash:
+          type: string
+        cache_id:
+          type: string
+        cache_hit_rate:
+          type: number
+        created_at:
+          type: string
+        updated_at:
+          type: string
+
+    SessionCreate:
+      type: object
+      required: [title, degree]
+      properties:
+        title:
+          type: string
+        degree:
+          type: string
+          enum: [master, doctor]
+        discipline:
+          type: string
+        mentor_info:
+          type: string
+
+    SessionList:
+      type: object
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Session'
+        total:
+          type: integer
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        dialog_rounds:
+          type: integer
+        context:
+          type: object
+        cache_prefix_hash:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+
+    ConversationCreate:
+      type: object
+      required: [session_id, title]
+      properties:
+        session_id:
+          type: string
+        title:
+          type: string
+
+    ConversationList:
+      type: object
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+        total:
+          type: integer
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        conversation_id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        tokens:
+          type: integer
+        agent_id:
+          type: string
+        model:
+          type: string
+        metadata:
+          type: object
+        created_at:
+          type: string
+
+    MessageCreate:
+      type: object
+      required: [conversation_id, role, content]
+      properties:
+        conversation_id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        agent_id:
+          type: string
+        model:
+          type: string
+
+    MessageList:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        total:
+          type: integer
+
+    Citation:
+      type: object
+      properties:
+        id:
+          type: string
+        message_id:
+          type: string
+        title:
+          type: string
+        authors:
+          type: array
+          items:
+            type: string
+        year:
+          type: integer
+        venue:
+          type: string
+        abstract:
+          type: string
+        url:
+          type: string
+        source:
+          type: string
+
+    CitationList:
+      type: object
+      properties:
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+        total:
+          type: integer
+
+    AgentMetadata:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        model:
+          type: string
+        temperature:
+          type: number
+        max_tokens:
+          type: integer
+        capabilities:
+          type: array
+          items:
+            type: string
+        stages:
+          type: array
+          items:
+            type: string
+
+    AgentList:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentMetadata'
+        count:
+          type: integer
+
+    OrchestrateRequest:
+      type: object
+      required: [session_id, user_input]
+      properties:
+        session_id:
+          type: string
+        conversation_id:
+          type: string
+        user_input:
+          type: string
+        degree:
+          type: string
+        discipline:
+          type: string
+        mentor_info:
+          type: string
+
+    CacheStats:
+      type: object
+      properties:
+        total_requests:
+          type: integer
+        cache_hits:
+          type: integer
+        cache_hit_rate:
+          type: number
+        total_cached_tokens:
+          type: integer
+        total_uncached_tokens:
+          type: integer
+        cost_saved_cny:
+          type: number
+        by_session:
+          type: object
+        by_agent:
+          type: object
+
+    LineageNode:
+      type: object
+      properties:
+        id:
+          type: string
+        node_type:
+          type: string
+        title:
+          type: string
+        abstract:
+          type: string
+        metadata:
+          type: object
+
+    LineageNodeList:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageNode'
+        total:
+          type: integer
+
+    LineageEdge:
+      type: object
+      properties:
+        id:
+          type: string
+        source_id:
+          type: string
+        target_id:
+          type: string
+        relation_type:
+          type: string
+        weight:
+          type: number
+
+    LineageGraph:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageEdge'
+
+    LineageImport:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/LineageEdge'
+
+    InspireRequest:
+      type: object
+      properties:
+        degree:
+          type: string
+        discipline:
+          type: string
+        mentor_info:
+          type: string
+
+    ProposalGenerateRequest:
+      type: object
+      required: [degree]
+      properties:
+        degree:
+          type: string
+        discipline:
+          type: string
+        mentor_info:
+          type: string
+        mode:
+          type: string
+        count:
+          type: integer
+        session_id:
+          type: string

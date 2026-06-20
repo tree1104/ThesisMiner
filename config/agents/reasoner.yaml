@@ -1,0 +1,145 @@
+# Reasoner Agent 配置
+# 推理 Agent，四维创意生成
+# 版本：v8.0
+# 日期：2026-06-19
+
+agent_id: reasoner
+name: Reasoner
+description: 推理 Agent，四维创意生成与谱系解析
+version: v8.0
+
+# 模型配置
+model: deepseek-r2
+fallback_model: gemini-2.5-pro
+temperature: 0.0
+max_tokens: 8192
+top_p: 1.0
+frequency_penalty: 0.0
+presence_penalty: 0.0
+
+# 能力声明
+capabilities:
+  - streaming
+  - thinking
+
+# 适用阶段
+stages:
+  - creativity
+
+# 系统提示词
+system_prompt: |
+  你是 ThesisMiner 的推理 Agent（Reasoner），是四维创意引擎的核心。
+
+  你的核心职责：
+  1. 谱系解析：调用 lineage_parser.parse_lineage(text) 解析非结构化谱系文本，构建 LineageGraph。
+  2. 四维创意生成：并行执行四个策略生成候选论题。
+  3. 自评分过滤：按 可行性 × 0.4 + 创新度 × 0.3 + 谱系贴合度 × 0.3 打分，过滤 < 6 分的候选。
+  4. search_feeds 注入：将阶段一检索到的热点文献作为种子语料，提升候选论题的时效性。
+
+  四维创意策略：
+  - 导师项目延伸（advisor_extension）：将大项目拆解为可在学制内完成的子课题
+  - 同门成果继承（peer_inheritance）：基于边缘探测的局限点，引入新变量或迁移至新场景
+  - 跨域联想（cross_domain）：识别多个不相关学科概念，生成"A 领域方法解 B 领域问题"候选
+  - 矛盾驱动挖掘（contradiction_driven）：检测"现有方法能力边界"与"实际需求"的语义矛盾
+
+  自评分机制：
+  - 可行性（0-10）：学制内可完成度、数据/算力可获得性、技术成熟度
+  - 创新度（0-10）：与同门已有工作的差异化程度、方法新颖性
+  - 谱系贴合度（0-10）：与导师项目目标的对齐程度、对边缘点的承接程度
+  - 总分 = 可行性 × 0.4 + 创新度 × 0.3 + 谱系贴合度 × 0.3
+  - 过滤规则：总分 < 6 分的候选直接丢弃，保留 Top 3-5 个方向
+
+# 四维创意配置
+creativity:
+  strategies:
+    - id: advisor_extension
+      name: 导师项目延伸
+      weight: 0.9
+      enabled: true
+    - id: peer_inheritance
+      name: 同门成果继承
+      weight: 0.8
+      enabled: true
+    - id: cross_domain
+      name: 跨域联想
+      weight: 0.7
+      enabled: true
+    - id: contradiction_driven
+      name: 矛盾驱动挖掘
+      weight: 0.6
+      enabled: true
+
+  # 自评分权重
+  scoring_weights:
+    feasibility: 0.4
+    novelty: 0.3
+    lineage_fit: 0.3
+
+  # 过滤规则
+  filtering:
+    min_score: 6.0
+    max_candidates: 5
+    min_candidates: 3
+
+  # search_feeds 注入
+  search_feeds:
+    enabled: true
+    max_feeds: 10
+    fallback_to_none: true  # search_feeds=None 时退化为 V2.1 行为
+
+# 阶段门禁规则
+gate_rules:
+  creativity:
+    min_candidates: 3
+    min_score: 6.0
+    retry_max: 3
+
+# 重试配置
+retry:
+  max_attempts: 3
+  base_delay: 2.0
+  max_delay: 30.0
+  backoff: exponential
+  retryable_errors:
+    - AGENT_TIMEOUT
+    - AGENT_RATE_LIMIT
+    - AGENT_JSON_PARSE
+    - MODEL_UNAVAILABLE
+
+# 兜底降级配置
+fallback:
+  strategy: fallback_proposal
+  confidence_score: 0.4
+  description: 基于候选信息拼装结构完整的简化提案
+
+# 上下文配置
+context:
+  max_history_rounds: 3
+  recent_history_rounds: 2
+  dst_compression_threshold: 5
+  context_overflow_threshold: 0.8
+
+# 缓存配置
+cache:
+  enabled: true
+  prefix_version: v8.0.1
+  warmup_on_session_create: false
+  target_hit_rate: 0.95
+
+# 可观测性
+observability:
+  log_level: INFO
+  record_tokens: true
+  record_duration: true
+  record_cache_stats: true
+  record_score_distribution: true
+
+# 元数据
+metadata:
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  tags:
+    - reasoner
+    - creativity
+    - lineage

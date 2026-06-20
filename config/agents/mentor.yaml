@@ -1,0 +1,173 @@
+# Mentor Agent 配置
+# 导师 Agent，导师视角评审与答辩预演
+# 版本：v8.0
+# 日期：2026-06-19
+
+agent_id: mentor
+name: Mentor
+description: 导师 Agent，导师视角评审与答辩预演
+version: v8.0
+
+# 模型配置
+model: gpt-4.1
+fallback_model: glm-4.6
+temperature: 0.7
+max_tokens: 8192
+top_p: 1.0
+frequency_penalty: 0.0
+presence_penalty: 0.0
+
+# 能力声明
+capabilities:
+  - streaming
+
+# 适用阶段
+stages:
+  - deep_assist
+
+# 系统提示词
+system_prompt: |
+  你是 ThesisMiner 的导师 Agent（Mentor），模拟真实导师的视角对候选提案进行评审与提问。
+
+  你的核心职责：
+  1. 导师视角评审：从可行性、创新性、与课题组方向的契合度三个维度给出评语。
+  2. 答辩预演提问：模拟答辩评委的提问风格，生成 3-5 个关键问题。
+  3. 改进建议：针对提案的薄弱环节给出具体的改进方向。
+  4. 深度辅助闭环：在阶段五提供文献精读工作簿、实验预研映射、答辩模拟三件套。
+
+  评审维度：
+  - 可行性评估：学制内可完成性、数据可获得性、算力需求、技术成熟度
+  - 创新性评估：与同门工作的差异化、方法新颖性、理论贡献潜力
+  - 谱系契合度评估：与导师项目目标的对齐、对边缘探测点的承接、课题组资源支持
+
+  答辩预演提问风格：
+  - 方法类：你为什么选择 X 方法？与 Y 方法相比有何优势？
+  - 内容类：你的研究内容中，X 与 Y 的关系是什么？
+  - 创新类：你的创新点是什么？与已有研究 Z 的区别在哪？
+  - 可行性类：你如何在学制内完成这些工作？数据从哪里来？
+  - 意义类：你的研究有什么实际价值？理论贡献是什么？
+
+  深度辅助三件套：
+  - literature_deep_reader：基于研究现状生成文献精读工作簿
+  - experiment_designer：基于研究内容与学科生成实验预研映射
+  - thesis_defense_simulator：基于关键问题生成答辩模拟轮次
+
+# 评审配置
+review:
+  dimensions:
+    - id: feasibility
+      name: 可行性评估
+      sub_dimensions:
+        - time_completeness
+        - data_availability
+        - compute_requirement
+        - tech_maturity
+    - id: novelty
+      name: 创新性评估
+      sub_dimensions:
+        - differentiation
+        - method_novelty
+        - theory_contribution
+    - id: lineage_fit
+      name: 谱系契合度评估
+      sub_dimensions:
+        - advisor_alignment
+        - edge_inheritance
+        - group_resource
+
+  # 答辩预演配置
+  defense_simulation:
+    min_questions: 3
+    max_questions: 5
+    question_types:
+      - method
+      - content
+      - innovation
+      - feasibility
+      - significance
+
+  # 改进建议配置
+  improvement_suggestions:
+    min_suggestions: 2
+    max_suggestions: 3
+
+# 深度辅助配置
+deep_assist:
+  literature_deep_reader:
+    default_count: 10
+    max_count: 20
+    output_fields:
+      - reading_order
+      - key_questions
+      - comparison_matrix
+
+  experiment_designer:
+    output_fields:
+      - variables
+      - control_groups
+      - datasets
+      - metrics
+      - baseline
+
+  thesis_defense_simulator:
+    default_rounds: 3
+    max_rounds: 5
+    output_fields:
+      - questions
+      - reference_answers
+      - follow_ups
+
+# 阶段门禁规则
+gate_rules:
+  deep_assist:
+    require_menu_render: true
+    require_user_end: true
+    loop: true
+
+# 重试配置
+retry:
+  max_attempts: 3
+  base_delay: 2.0
+  max_delay: 30.0
+  backoff: exponential
+  retryable_errors:
+    - AGENT_TIMEOUT
+    - AGENT_RATE_LIMIT
+    - AGENT_JSON_PARSE
+    - MODEL_UNAVAILABLE
+
+# 兜底降级配置
+fallback:
+  strategy: skip_mentor
+  description: 跳过导师评审，记录 mentor_skipped=true
+
+# 上下文配置
+context:
+  max_history_rounds: 5
+  recent_history_rounds: 2
+  dst_compression_threshold: 5
+  context_overflow_threshold: 0.8
+
+# 缓存配置
+cache:
+  enabled: true
+  prefix_version: v8.0.1
+  warmup_on_session_create: false
+  target_hit_rate: 0.95
+
+# 可观测性
+observability:
+  log_level: INFO
+  record_tokens: true
+  record_duration: true
+  record_cache_stats: true
+
+# 元数据
+metadata:
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  tags:
+    - mentor
+    - review
+    - defense

@@ -1,0 +1,141 @@
+# Orchestrator Agent 配置
+# 主管理 Agent，调度五阶段流程
+# 版本：v8.0
+# 日期：2026-06-19
+
+agent_id: orchestrator
+name: Orchestrator
+description: 主管理 Agent，调度五阶段流程
+version: v8.0
+
+# 模型配置
+model: claude-sonnet-4.5
+fallback_model: gemini-2.5-pro
+temperature: 0.3
+max_tokens: 8192
+top_p: 1.0
+frequency_penalty: 0.0
+presence_penalty: 0.0
+
+# 能力声明
+capabilities:
+  - streaming
+  - thinking
+  - web_search
+
+# 适用阶段
+stages:
+  - info_confirm
+  - creativity
+  - validation
+  - generation
+  - deep_assist
+
+# 系统提示词
+system_prompt: |
+  你是 ThesisMiner 的主管理 Agent（Orchestrator），负责调度五阶段闭环导航流。
+
+  你的核心职责：
+  1. 解析用户输入，识别当前所处的阶段（信息确权 / 谱系解析 / 重复度评估 / 多粒度生成 / 深度辅助）。
+  2. 根据阶段门禁规则，决定下一步调用哪个子 Agent（Searcher/Reasoner/Critic/Mentor/Writer）。
+  3. 将上一阶段的输出转换为下一阶段的输入，必要时进行格式转换。
+  4. 监控各 Agent 的执行状态，失败时触发重试或兜底降级。
+  5. 通过 SSE 将中间结果实时推送给前端。
+
+  阶段门禁规则：
+  - 阶段一 → 阶段二：必须完成联网检索并展示文献摘要，等待用户确认。
+  - 阶段二 → 阶段三：候选提案必须 ≥3 个，且每个提案的 score ≥6 分。
+  - 阶段三 → 阶段四：硬约束校验通过（标题格式、学术日历、文献基线、逻辑自洽）。
+  - 阶段四 → 阶段五：开题报告生成成功，且 style_normalizer 已执行。
+  - 阶段五：进入后置交互循环，不主动结束对话。
+
+  输出格式：
+  - 调度指令：{ "next_agent": "...", "input": {...}, "stage": "..." }
+  - 中间结果：{ "agent": "...", "output": {...}, "tokens_used": N }
+  - 错误信息：{ "error": "...", "retryable": true/false, "fallback": "..." }
+
+# 阶段门禁规则
+gate_rules:
+  info_confirm:
+    require_user_confirmation: true
+    require_search_results: true
+    fallback_on_skip: true
+    fallback_strategy: rule_8_time_window
+
+  creativity:
+    min_candidates: 3
+    min_score: 6.0
+    retry_max: 3
+    retry_stage: creativity
+    fallback: fallback_proposal
+
+  validation:
+    hard_constraints_pass: true
+    auto_repair: true
+    retry_max: 2
+    retry_stage: creativity
+    fallback: mark_warning
+
+  generation:
+    report_generated: true
+    style_normalizer_applied: true
+    fallback: template_mode
+
+  deep_assist:
+    require_menu_render: true
+    require_user_end: true
+    loop: true
+
+# 重试配置
+retry:
+  max_attempts: 3
+  base_delay: 2.0
+  max_delay: 30.0
+  backoff: exponential
+  retryable_errors:
+    - AGENT_TIMEOUT
+    - AGENT_RATE_LIMIT
+    - AGENT_JSON_PARSE
+    - MODEL_UNAVAILABLE
+
+# 兜底降级配置
+fallback:
+  strategy: fallback_proposal
+  confidence_score: 0.4
+  cascade:
+    - searcher: mock_searcher
+    - reasoner: fallback_proposal
+    - critic: mark_warning
+    - mentor: skip_mentor
+    - writer: template_mode
+
+# 上下文配置
+context:
+  max_history_rounds: 5
+  recent_history_rounds: 2
+  dst_compression_threshold: 5
+  context_overflow_threshold: 0.8
+
+# 缓存配置
+cache:
+  enabled: true
+  prefix_version: v8.0.1
+  warmup_on_session_create: true
+  target_hit_rate: 0.95
+
+# 可观测性
+observability:
+  log_level: INFO
+  record_tokens: true
+  record_duration: true
+  record_cache_stats: true
+
+# 元数据
+metadata:
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  tags:
+    - orchestrator
+    - scheduler
+    - main

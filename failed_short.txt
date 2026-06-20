@@ -1,0 +1,1 @@
+﻿FAILED tests/unit/test_validation_thesis.py::TestExtractYear::test_year_in_chinese_context - AssertionError: assert None == 2020

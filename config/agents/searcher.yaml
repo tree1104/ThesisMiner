@@ -1,0 +1,188 @@
+# Searcher Agent 配置
+# 检索 Agent，联网检索文献与新颖性评估
+# 版本：v8.0
+# 日期：2026-06-19
+
+agent_id: searcher
+name: Searcher
+description: 检索 Agent，联网检索文献与新颖性评估
+version: v8.0
+
+# 模型配置
+model: deepseek-v3.2
+fallback_model: doubao-1.5-pro
+temperature: 0.7
+max_tokens: 4096
+top_p: 1.0
+frequency_penalty: 0.0
+presence_penalty: 0.0
+
+# 能力声明
+capabilities:
+  - streaming
+  - web_search
+
+# 适用阶段
+stages:
+  - info_confirm
+  - validation
+
+# 系统提示词
+system_prompt: |
+  你是 ThesisMiner 的检索 Agent（Searcher），负责所有联网检索任务。
+
+  你的核心职责：
+  1. 阶段一信息确权：基于用户输入生成检索式，联网检索近 2 年文献，展示摘要。
+  2. 阶段三重复度评估：基于候选标题联网检索近 5 年硕博论文与期刊，输出新颖性风险评级。
+  3. 文献基线补全：当文献数量不足时，自动补充子方向检索词与数据库建议。
+  4. 检索式优化：根据用户反馈调整检索式，提升检索质量。
+
+  检索式生成规则：
+  检索式 = (学科关键词 OR 同义词) AND (时间窗口) AND (文献类型)
+
+  时间窗口配置：
+  - inspiration_window: 近 2 年（阶段一信息确权）
+  - novelty_window: 近 5 年（阶段三重复度评估）
+
+  检索源：
+  - arXiv: https://export.arxiv.org/api/query
+  - Semantic Scholar: https://api.semanticscholar.org/graph/v1
+
+  降级机制：
+  - 真实检索超时（>5s）→ 自动降级为 MockSearcher
+  - arXiv 不可用 → 仅使用 Semantic Scholar
+  - Semantic Scholar 不可用 → 仅使用 arXiv
+  - 两者都不可用 → 降级为 MockSearcher
+
+# 检索策略配置
+search_strategies:
+  # 阶段一信息确权
+  inspiration_window: 2  # 近 2 年
+  inspiration_max_results: 10
+
+  # 阶段三重复度评估
+  novelty_window: 5  # 近 5 年
+  novelty_max_results: 20
+
+  # 布尔运算符
+  boolean_operators:
+    - AND
+    - OR
+    - NOT
+
+  # 可调节步长（年）
+  adjustable_step: 1
+
+  # 检索源配置
+  sources:
+    - id: arxiv
+      name: arXiv
+      url: https://export.arxiv.org/api/query
+      enabled: true
+      api_key_env: SEARCH_API_KEYS_ARXIV
+
+    - id: semantic_scholar
+      name: Semantic Scholar
+      url: https://api.semanticscholar.org/graph/v1
+      enabled: true
+      api_key_env: SEARCH_API_KEYS_SEMANTIC_SCHOLAR
+
+# 检索实现配置
+search_implementation:
+  real_search_enabled: false  # 默认关闭，需显式开启
+  timeout_seconds: 5  # 5 秒超时自动降级
+  max_retries: 2
+  retry_delay: 1.0
+
+  # 降级配置
+  degradation:
+    enabled: true
+    fallback: mock_searcher
+    mark_degraded: true  # 标记 search_degraded=true
+
+# 重复度评估配置
+novelty_assessment:
+  # 相似度计算
+  similarity_algorithm: cosine  # 余弦相似度
+  embedding_model: text-embedding-3-small
+
+  # 风险评级阈值
+  risk_thresholds:
+    low: 0.5
+    medium: 0.7
+    high: 1.0
+
+  # 输出字段
+  output_fields:
+    - risk_level
+    - max_similarity
+    - avg_similarity
+    - high_similarity_count
+    - differentiation_gaps
+
+# 文献基线补全配置
+literature_supplement:
+  enabled: true
+  master_min: 30
+  doctor_min: 50
+  supplement_strategy: add_search_keywords
+
+# 阶段门禁规则
+gate_rules:
+  info_confirm:
+    require_search_results: true
+    require_abstract_display: true
+    max_display_results: 10
+
+  validation:
+    require_novelty_assessment: true
+    require_differentiation_gaps: true
+
+# 重试配置
+retry:
+  max_attempts: 3
+  base_delay: 1.0
+  max_delay: 10.0
+  backoff: exponential
+  retryable_errors:
+    - AGENT_TIMEOUT
+    - AGENT_RATE_LIMIT
+    - SEARCH_API_ERROR
+
+# 兜底降级配置
+fallback:
+  strategy: mock_searcher
+  description: 降级为 MockSearcher，返回模拟文献，标记 search_degraded=true
+
+# 上下文配置
+context:
+  max_history_rounds: 2
+  recent_history_rounds: 1
+  dst_compression_threshold: 5
+  context_overflow_threshold: 0.8
+
+# 缓存配置
+cache:
+  enabled: true
+  prefix_version: v8.0.1
+  warmup_on_session_create: false
+  target_hit_rate: 0.95
+
+# 可观测性
+observability:
+  log_level: INFO
+  record_tokens: true
+  record_duration: true
+  record_cache_stats: true
+  record_search_degraded: true
+  record_novelty_risk: true
+
+# 元数据
+metadata:
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  tags:
+    - searcher
+    - retrieval
+    - novelty

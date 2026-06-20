@@ -1,0 +1,1 @@
+﻿ERROR tests/unit/test_utils_logger.py::TestEdgeCases::test_formatter_with_special_chars - TypeError: StructuredFormatter.__init__() got an unexpected keyword argument 'format_mode'

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="editorial" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="ThesisMiner v9.0 - 学术语境驱动的实战论题生成与开题架构" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>ThesisMiner v9.0 · 学术论题生成系统</title>
+
+  <!-- Google Fonts: Fraunces / DM Sans / Noto Serif SC / Noto Sans SC / JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Tailwind 主题对齐设计令牌（v9.0：映射到 CSS 变量以支持多主题切换）
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            ink: {
+              primary: 'var(--bg-primary)',
+              secondary: 'var(--bg-secondary)',
+              tertiary: 'var(--bg-tertiary)',
+              elevated: 'var(--bg-elevated)',
+            },
+            paper: {
+              primary: 'var(--text-primary)',
+              secondary: 'var(--text-secondary)',
+              muted: 'var(--text-muted)',
+            },
+            amber: {
+              DEFAULT: 'var(--accent-primary)',
+              deep: 'var(--accent-secondary)',
+            },
+            success: 'var(--success)',
+            warning: 'var(--warning)',
+            danger: 'var(--danger)',
+            info: 'var(--info)',
+          },
+          fontFamily: {
+            display: ['Fraunces', 'Noto Serif SC', 'serif'],
+            body: ['DM Sans', 'Noto Sans SC', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Lucide Icons (pinned version for stability) -->
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+
+  <!-- 自定义设计系统 -->
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- ===================== 侧边导航栏 ===================== -->
+    <aside class="sidebar">
+      <!-- Logo 区域 -->
+      <div class="sidebar__logo">
+        <div class="sidebar__logo-title">
+          <span><span class="logo-mark">Thesis</span>Miner</span>
+          <span class="sidebar__logo-version">v9.0</span>
+        </div>
+        <div class="sidebar__logo-subtitle">学术论题生成系统</div>
+      </div>
+
+      <!-- 导航项（由 app.js 动态渲染） -->
+      <nav class="sidebar__nav" aria-label="主导航"></nav>
+
+      <!-- 底部 AI 配置状态指示灯 -->
+      <div class="sidebar__footer">
+        <div class="ai-status" title="AI 服务配置状态">
+          <span class="ai-status__dot unconfigured"></span>
+          <span class="ai-status__text">AI 未配置</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===================== 主内容区 ===================== -->
+    <main class="main-content">
+      <!-- 全局顶栏：主题切换器 + API 状态徽章（v7.0/v9.0） -->
+      <header class="topbar">
+        <!-- 主题切换器（v9.0 多主题） -->
+        <div class="theme-switcher" id="theme-switcher">
+          <button class="theme-switcher__trigger" id="theme-trigger" aria-label="切换主题" aria-haspopup="true" aria-expanded="false">
+            <span class="theme-switcher__trigger-icon" data-lucide="palette"></span>
+            <span class="theme-switcher__label" id="theme-current-label">Editorial Academic</span>
+            <span class="theme-switcher__caret" data-lucide="chevron-down"></span>
+          </button>
+          <div class="theme-switcher__menu" id="theme-menu" role="menu" hidden></div>
+        </div>
+        <span class="badge badge--default" id="global-api-status" title="AI 服务连接状态">
+          <span class="badge__dot"></span>
+          <span id="api-status-text">检测中</span>
+        </span>
+      </header>
+      <div id="app-content">
+        <!-- 初始加载占位 -->
+        <div class="loading-overlay">
+          <div class="spinner spinner--lg"></div>
+          <div>正在加载学术殿堂…</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== 全局通知容器 ===================== -->
+  <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- ===================== 详情抽屉容器 ===================== -->
+  <div id="drawer-container"></div>
+
+  <!-- ===================== 脚本：按依赖顺序加载 ===================== -->
+  <!-- D3.js v7 力导向图谱库（谱系页面依赖） -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <!-- API 客户端（基础依赖） -->
+  <script src="scripts/api.js"></script>
+  <!-- 多主题切换系统（v9.0） -->
+  <script src="scripts/themes.js"></script>
+  <!-- 应用主逻辑（路由 / 状态 / 工具） -->
+  <script src="scripts/app.js"></script>
+  <!-- 各页面脚本按需在 app.js 中通过 loadPageScript 动态加载 -->
+</body>
+</html>

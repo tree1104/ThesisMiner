@@ -1,0 +1,39 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.env
+*.sqlite
+*.db
+data/
+!data/.gitkeep
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.trae/
+
+# ML 模型文件（体积过大，不纳入版本控制，运行时按需下载）
+all-MiniLM-L6-v2/
+Qwen3-reranker-0.6B/
+ROCM/
+*.bin
+*.safetensors
+*.onnx
+*.gguf
+
+# 日志目录
+logs/
+
+# 临时工具脚本与草稿（不纳入版本控制）
+COMMIT_MSG.txt
+_count_lines.ps1
+_verify_temp.py
+_verify_*.py
+_*.ps1
+tmp/
+*.tmp

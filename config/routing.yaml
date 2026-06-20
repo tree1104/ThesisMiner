@@ -1,0 +1,531 @@
+# =============================================================================
+# ThesisMiner v8.0 路由配置文件
+# =============================================================================
+# 本文件定义 ThesisMiner 的五阶段步骤路由与模型选择策略，包括：
+#   - 五阶段步骤定义（info_confirm / creativity / validation / generation / deep_assist）
+#   - 每个步骤的默认模型与备选模型
+#   - 按学位分级的路由策略（master / doctor）
+#   - 降级策略（主模型失败时自动切换备选）
+#   - 重试策略（重试次数/延迟/退避）
+#   - 成本优化策略（低成本优先/缓存优先）
+#   - 负载均衡策略（轮询/加权/最少连接）
+#   - 管道模板路由（20+ 管道模板的模型分配）
+#
+# 路由优先级：用户显式指定 > 学位分级 > 步骤默认 > 全局默认
+# =============================================================================
+
+# ===== 全局路由配置 =====
+global:
+  # 默认路由策略
+  strategy: "priority"  # priority / round_robin / weighted / least_cost
+  # 默认学位
+  default_degree: "master"
+  # 是否启用自动降级
+  auto_fallback: true
+  # 是否启用成本优化
+  cost_optimization: true
+  # 是否启用缓存优先
+  cache_first: true
+  # 路由决策日志
+  log_routing_decisions: true
+
+# ===== 五阶段步骤路由 =====
+steps:
+
+  # ---------------------------------------------------------------------------
+  # 阶段一：信息确权（info_confirm）
+  # ---------------------------------------------------------------------------
+  - name: "info_confirm"
+    display_name: "信息确权"
+    description: "收集用户基本信息：学位/学科/导师/研究方向/时间约束"
+    order: 1
+
+    # 默认模型配置
+    models:
+      default: "claude-sonnet-4.5"
+      alternatives:
+        - "gpt-4.1"
+        - "glm-4.6"
+        - "deepseek-v3.2"
+
+    # 按学位分级
+    degree_routing:
+      master:
+        model: "claude-sonnet-4.5"
+        temperature: 0.3
+        max_tokens: 4096
+      doctor:
+        model: "claude-sonnet-4.5"
+        temperature: 0.3
+        max_tokens: 8192
+
+    # 生成参数
+    params:
+      temperature: 0.3  # 低温度保证一致性
+      top_p: 0.9
+      max_tokens: 4096
+      stream: true
+
+    # 超时与重试
+    timeout: 60
+    max_retries: 3
+    retry_delay: 2.0
+
+    # 降级链
+    fallback_chain:
+      - "gpt-4.1"
+      - "glm-4.6"
+      - "deepseek-v3.2"
+
+  # ---------------------------------------------------------------------------
+  # 阶段二：创意激发（creativity）
+  # ---------------------------------------------------------------------------
+  - name: "creativity"
+    display_name: "创意激发"
+    description: "生成多个候选论题，激发用户创意思维"
+    order: 2
+
+    models:
+      default: "qwen3-max"
+      alternatives:
+        - "gpt-4.1"
+        - "claude-sonnet-4.5"
+        - "deepseek-v3.2"
+
+    degree_routing:
+      master:
+        model: "qwen3-max"
+        temperature: 0.9
+        max_tokens: 4096
+        candidate_count: 5
+      doctor:
+        model: "qwen3-max"
+        temperature: 0.8
+        max_tokens: 8192
+        candidate_count: 8
+
+    params:
+      temperature: 0.9  # 高温度保证创意性
+      top_p: 0.95
+      max_tokens: 4096
+      stream: true
+
+    timeout: 90
+    max_retries: 2
+    retry_delay: 2.0
+
+    fallback_chain:
+      - "gpt-4.1"
+      - "claude-sonnet-4.5"
+      - "deepseek-v3.2"
+
+  # ---------------------------------------------------------------------------
+  # 阶段三：校验（validation）
+  # ---------------------------------------------------------------------------
+  - name: "validation"
+    display_name: "可行性校验"
+    description: "校验候选论题的可行性/原创性/规范性"
+    order: 3
+
+    models:
+      default: "deepseek-r2"
+      alternatives:
+        - "gemini-2.5-pro"
+        - "claude-sonnet-4.5"
+
+    degree_routing:
+      master:
+        model: "deepseek-r2"
+        temperature: 0.0
+        max_tokens: 8192
+      doctor:
+        model: "deepseek-r2"
+        temperature: 0.0
+        max_tokens: 16384
+
+    params:
+      temperature: 0.0  # 零温度保证严谨性
+      top_p: 1.0
+      max_tokens: 8192
+      stream: true
+      enable_thinking: true
+
+    timeout: 120
+    max_retries: 2
+    retry_delay: 3.0
+
+    fallback_chain:
+      - "gemini-2.5-pro"
+      - "claude-sonnet-4.5"
+
+  # ---------------------------------------------------------------------------
+  # 阶段四：生成（generation）
+  # ---------------------------------------------------------------------------
+  - name: "generation"
+    display_name: "多粒度生成"
+    description: "生成标题/摘要/大纲/全文等多粒度内容"
+    order: 4
+
+    models:
+      default: "claude-opus-4.5"
+      alternatives:
+        - "gpt-4.1"
+        - "claude-sonnet-4.5"
+
+    degree_routing:
+      master:
+        model: "claude-sonnet-4.5"
+        temperature: 0.7
+        max_tokens: 8192
+      doctor:
+        model: "claude-opus-4.5"
+        temperature: 0.7
+        max_tokens: 16384
+
+    params:
+      temperature: 0.7
+      top_p: 1.0
+      max_tokens: 8192
+      stream: true
+
+    timeout: 120
+    max_retries: 2
+    retry_delay: 3.0
+
+    fallback_chain:
+      - "gpt-4.1"
+      - "claude-sonnet-4.5"
+
+  # ---------------------------------------------------------------------------
+  # 阶段五：深度辅助（deep_assist）
+  # ---------------------------------------------------------------------------
+  - name: "deep_assist"
+    display_name: "深度辅助"
+    description: "文献精读/实验预研/答辩模拟等深度辅助功能"
+    order: 5
+
+    models:
+      default: "gemini-2.5-pro"
+      alternatives:
+        - "claude-sonnet-4.5"
+        - "gpt-4.1"
+
+    degree_routing:
+      master:
+        model: "gemini-2.5-pro"
+        temperature: 0.5
+        max_tokens: 8192
+      doctor:
+        model: "gemini-2.5-pro"
+        temperature: 0.5
+        max_tokens: 16384
+
+    params:
+      temperature: 0.5
+      top_p: 0.9
+      max_tokens: 8192
+      stream: true
+      enable_thinking: true
+
+    timeout: 120
+    max_retries: 2
+    retry_delay: 3.0
+
+    fallback_chain:
+      - "claude-sonnet-4.5"
+      - "gpt-4.1"
+
+# ===== Agent 角色路由 =====
+agent_routing:
+  # 编排 Agent
+  orchestrator:
+    default_model: "claude-sonnet-4.5"
+    fallback: "gpt-4.1"
+    max_concurrent: 1
+
+  # 检索 Agent
+  searcher:
+    default_model: "deepseek-v3.2"
+    fallback: "doubao-1.5-pro"
+    max_concurrent: 3
+
+  # 推理 Agent
+  reasoner:
+    default_model: "deepseek-r2"
+    fallback: "gemini-2.5-pro"
+    max_concurrent: 2
+
+  # 导师 Agent
+  mentor:
+    default_model: "gpt-4.1"
+    fallback: "glm-4.6"
+    max_concurrent: 2
+
+  # 创意 Agent
+  inspire:
+    default_model: "qwen3-max"
+    fallback: "deepseek-v3.2"
+    max_concurrent: 2
+
+  # 报告 Agent
+  report:
+    default_model: "claude-opus-4.5"
+    fallback: "claude-sonnet-4.5"
+    max_concurrent: 1
+
+  # 批评 Agent
+  critic:
+    default_model: "deepseek-r2"
+    fallback: "gemini-2.5-pro"
+    max_concurrent: 2
+
+# ===== 降级策略 =====
+fallback:
+  # 降级触发条件
+  triggers:
+    - name: "rate_limit_exceeded"
+      description: "触发限流"
+      action: "fallback"
+      cooldown: 60
+    - name: "timeout"
+      description: "请求超时"
+      action: "fallback"
+      cooldown: 30
+    - name: "service_unavailable"
+      description: "服务不可用"
+      action: "fallback"
+      cooldown: 120
+    - name: "cost_exceeded"
+      description: "成本超限"
+      action: "fallback"
+      cooldown: 3600
+    - name: "quota_exceeded"
+      description: "配额用尽"
+      action: "fallback"
+      cooldown: 86400
+    - name: "model_deprecated"
+      description: "模型已弃用"
+      action: "fallback"
+      cooldown: 0
+
+  # 降级链配置
+  chains:
+    - primary: "claude-opus-4.5"
+      chain: ["claude-sonnet-4.5", "gpt-4.1", "qwen3-max"]
+    - primary: "claude-sonnet-4.5"
+      chain: ["gpt-4.1", "qwen3-max", "deepseek-v3.2"]
+    - primary: "deepseek-r2"
+      chain: ["gemini-2.5-pro", "claude-sonnet-4.5", "gpt-4.1"]
+    - primary: "gpt-4.1"
+      chain: ["gpt-4.1-mini", "deepseek-v3.2", "doubao-1.5-pro"]
+    - primary: "qwen3-max"
+      chain: ["deepseek-v3.2", "glm-4.6", "doubao-1.5-pro"]
+
+# ===== 重试策略 =====
+retry:
+  # 默认重试配置
+  default:
+    max_retries: 3
+    initial_delay: 1.0
+    backoff_factor: 2.0
+    max_delay: 60.0
+    jitter: true
+
+  # 按错误类型配置
+  by_error:
+    - error_type: "RateLimitError"
+      max_retries: 5
+      initial_delay: 5.0
+      backoff_factor: 2.0
+    - error_type: "TimeoutError"
+      max_retries: 2
+      initial_delay: 2.0
+      backoff_factor: 3.0
+    - error_type: "ConnectionError"
+      max_retries: 3
+      initial_delay: 1.0
+      backoff_factor: 2.0
+    - error_type: "ServerError"
+      max_retries: 3
+      initial_delay: 2.0
+      backoff_factor: 2.0
+    - error_type: "AuthenticationError"
+      max_retries: 0  # 认证错误不重试
+      initial_delay: 0
+      backoff_factor: 1.0
+
+# ===== 成本优化策略 =====
+cost_optimization:
+  # 策略模式
+  mode: "balanced"  # low_cost / balanced / high_quality
+
+  # 低成本模式：优先使用低成本模型
+  low_cost:
+    preferred_models:
+      - "doubao-1.5-pro"
+      - "gpt-4.1-mini"
+      - "deepseek-v3.2"
+    max_cost_per_call: 1.0
+
+  # 平衡模式：根据任务复杂度选择
+  balanced:
+    simple_tasks: "deepseek-v3.2"
+    medium_tasks: "gpt-4.1"
+    complex_tasks: "claude-sonnet-4.5"
+    max_cost_per_call: 5.0
+
+  # 高质量模式：优先使用顶级模型
+  high_quality:
+    preferred_models:
+      - "claude-opus-4.5"
+      - "claude-sonnet-4.5"
+      - "gpt-4.1"
+    max_cost_per_call: 20.0
+
+  # 缓存策略
+  cache:
+    enabled: true
+    # 相同请求缓存命中率目标
+    target_hit_rate: 0.6
+    # 缓存 TTL（秒）
+    ttl: 1800
+    # 可缓存的步骤
+    cacheable_steps:
+      - "info_confirm"
+      - "validation"
+    # 不可缓存的步骤（创意/生成类）
+    non_cacheable_steps:
+      - "creativity"
+      - "generation"
+
+# ===== 负载均衡策略 =====
+load_balancing:
+  # 策略模式
+  strategy: "weighted_round_robin"  # round_robin / weighted / least_connections / random
+
+  # 权重配置（数值越大分配越多请求）
+  weights:
+    "deepseek-v3.2": 30
+    "gpt-4.1-mini": 20
+    "qwen3-max": 15
+    "glm-4.6": 10
+    "doubao-1.5-pro": 10
+    "claude-sonnet-4.5": 8
+    "gpt-4.1": 4
+    "deepseek-r2": 2
+    "gemini-2.5-pro": 1
+    "claude-opus-4.5": 0.5
+
+  # 最少连接配置
+  least_connections:
+    max_connections_per_model: 5
+    health_check_interval: 10
+
+# ===== 管道模板路由 =====
+pipeline_routing:
+  # 论题生成管道
+  proposal_generation:
+    stages:
+      info_confirm: "claude-sonnet-4.5"
+      creativity: "qwen3-max"
+      validation: "deepseek-r2"
+      generation: "claude-opus-4.5"
+      deep_assist: "gemini-2.5-pro"
+
+  # 文献综述管道
+  literature_review:
+    stages:
+      search: "deepseek-v3.2"
+      filter: "deepseek-v3.2"
+      classify: "gpt-4.1-mini"
+      summarize: "gpt-4.1"
+      review_write: "claude-sonnet-4.5"
+
+  # 可行性检查管道
+  feasibility_check:
+    stages:
+      time_check: "deepseek-r2"
+      resource_check: "deepseek-r2"
+      tech_check: "deepseek-r2"
+      overall_assessment: "claude-sonnet-4.5"
+
+  # 原创性检查管道
+  originality_check:
+    stages:
+      plagiarism_scan: "deepseek-v3.2"
+      novelty_score: "deepseek-r2"
+      similarity_analysis: "gemini-2.5-pro"
+      report: "gpt-4.1"
+
+  # 格式检查管道
+  format_check:
+    stages:
+      title_check: "gpt-4.1-mini"
+      abstract_check: "gpt-4.1-mini"
+      citation_check: "deepseek-v3.2"
+      overall_format: "gpt-4.1"
+
+  # 深度辅助管道
+  deep_assist_full:
+    stages:
+      literature_reading: "gemini-2.5-pro"
+      experiment_prep: "deepseek-r2"
+      defense_sim: "claude-sonnet-4.5"
+
+  # 多粒度生成管道
+  multi_granularity_generation:
+    stages:
+      topic_level: "qwen3-max"
+      abstract_level: "gpt-4.1"
+      outline_level: "claude-sonnet-4.5"
+      full_text_level: "claude-opus-4.5"
+
+  # 风格规范化管道
+  style_normalization:
+    stages:
+      replace_template_words: "gpt-4.1-mini"
+      adjust_sentence: "gpt-4.1"
+      remove_parallelism: "deepseek-r2"
+      final_polish: "claude-sonnet-4.5"
+
+  # A/B 测试管道
+  ab_test_pipeline:
+    stages:
+      generate_a: "claude-sonnet-4.5"
+      generate_b: "gpt-4.1"
+      compare: "deepseek-r2"
+      select_best: "deepseek-r2"
+
+  # 降级管道
+  fallback_pipeline:
+    stages:
+      primary: "claude-opus-4.5"
+      failure_detect: "deepseek-r2"
+      fallback: "gpt-4.1"
+      merge: "claude-sonnet-4.5"
+
+# ===== 学位特定配置 =====
+degree_config:
+  master:
+    # 文献基线数
+    literature_baseline: 30
+    # 最大年限
+    max_years: 1
+    # 候选论题数
+    candidate_count: 5
+    # 生成深度
+    generation_depth: "standard"
+    # 预算上限（元/月）
+    monthly_budget: 500
+
+  doctor:
+    # 文献基线数
+    literature_baseline: 50
+    # 最大年限
+    max_years: 2
+    # 候选论题数
+    candidate_count: 8
+    # 生成深度
+    generation_depth: "deep"
+    # 预算上限（元/月）
+    monthly_budget: 2000

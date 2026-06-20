@@ -1,0 +1,232 @@
+# Writer Agent 配置
+# 写作 Agent，多粒度生成与降重脱敏
+# 版本：v8.0
+# 日期：2026-06-19
+
+agent_id: writer
+name: Writer
+description: 写作 Agent，多粒度生成与降重脱敏
+version: v8.0
+
+# 模型配置
+model: claude-opus-4.5
+fallback_model: qwen3-max
+temperature: 0.7
+max_tokens: 16384
+top_p: 1.0
+frequency_penalty: 0.0
+presence_penalty: 0.0
+
+# 能力声明
+capabilities:
+  - streaming
+  - thinking
+
+# 适用阶段
+stages:
+  - generation
+
+# 系统提示词
+system_prompt: |
+  你是 ThesisMiner 的写作 Agent（Writer），负责开题报告的最终生成。
+
+  你的核心职责：
+  1. 多粒度渲染：按 concise/standard/detailed 三级颗粒度渲染 Markdown。
+  2. 章节结构：严格按 6 章节标准结构生成报告。
+  3. 降重脱敏：调用 style_normalizer 执行 200+ 禁用词替换、句首过滤、语态互换。
+  4. 文件输出：在文件输出模式下，将报告写入 output/draft_<timestamp>.md。
+  5. 模板兜底：AI 增强模式失败时，回退到模板兜底模式。
+
+  多粒度配置：
+  - concise（精简）：markdown_depth=2，3000-5000 字
+  - standard（标准）：markdown_depth=3，6000-10000 字
+  - detailed（详实）：markdown_depth=4，12000-20000 字
+
+  报告章节结构（6 章节）：
+  1. 基本信息
+  2. 选题依据
+  3. 国内外研究现状
+  4. 研究内容
+  5. 技术路线与可行性分析
+  6. 进度安排
+
+  降重脱敏规则（Rule 9）：
+  - 禁用词替换（200+ 条）："首先"→""，"其次"→"接着"，"最后"→"最终"，"综上所述"→"总的来看"
+  - 句首过滤：删除以"首先/其次/再次/最后"开头的句子
+  - 语态互换：被动语态转主动语态
+  - 句长分布：目标均值 15-25 字，标准差 8-12
+  - 并列结构检测：连续 ≥3 个并列结构打破
+
+  style_normalizer 优先级高于排版，但仅替换文本内容，不破坏 Markdown 结构。
+
+# 多粒度配置
+granularity:
+  concise:
+    markdown_depth: 2
+    min_words: 3000
+    max_words: 5000
+    description: 精简版，仅保留核心模块与关键论点
+
+  standard:
+    markdown_depth: 3
+    min_words: 6000
+    max_words: 10000
+    description: 标准版，对齐标准开题报告深度
+
+  detailed:
+    markdown_depth: 4
+    min_words: 12000
+    max_words: 20000
+    description: 详实版，追加风险矩阵、预期成果等 #### 级子节
+
+# 报告章节配置
+report_sections:
+  - id: basic_info
+    name: 基本信息
+    required: true
+    fields:
+      - title
+      - degree
+      - discipline
+      - advisor
+      - research_direction
+      - timeframe
+
+  - id: topic_basis
+    name: 选题依据
+    required: true
+    subsections:
+      - research_background
+      - research_significance
+      - research_questions
+
+  - id: research_status
+    name: 国内外研究现状
+    required: true
+    subsections:
+      - international_status
+      - domestic_status
+      - research_review
+
+  - id: research_content
+    name: 研究内容
+    required: true
+    subsections:
+      - research_objective
+      - research_content
+      - key_problems
+
+  - id: technical_route
+    name: 技术路线与可行性分析
+    required: true
+    subsections:
+      - technical_route
+      - feasibility_analysis
+      - risk_assessment
+
+  - id: schedule
+    name: 进度安排
+    required: true
+    format: table
+
+# 降重脱敏配置
+style_normalizer:
+  enabled: true
+  priority: high  # 高于排版
+  rules:
+    - replacements_count_target: 20  # 每千字目标替换数
+    - sentence_length:
+        target_mean: 20
+        target_std: 10
+        max_length: 50
+        min_length: 5
+    - parallel_structure:
+        max_consecutive: 2
+    - transition_words:
+        max_frequency_per_1000: 5
+    - passive_voice:
+        max_ratio: 0.2
+
+  # 禁用词替换（部分示例，完整列表见 config/constraints/style_rules.yaml）
+  replacements:
+    - pattern: "首先"
+      replacement: ""
+      context: "paragraph_start"
+    - pattern: "其次"
+      replacement: "接着"
+    - pattern: "最后"
+      replacement: "最终"
+    - pattern: "综上所述"
+      replacement: "总的来看"
+
+# 文件输出配置
+file_output:
+  enabled: true
+  output_dir: "output/"
+  filename_pattern: "draft_{timestamp}.md"
+  timestamp_format: "%Y%m%d_%H%M%S"
+
+# 模板兜底配置
+template_fallback:
+  enabled: true
+  template_file: "docs/constraints/report_template.md"
+  mode_field: "mode"
+  fallback_mode: "template"
+
+# 阶段门禁规则
+gate_rules:
+  generation:
+    report_generated: true
+    style_normalizer_applied: true
+    sections_complete: true
+    word_count_in_range: true
+
+# 重试配置
+retry:
+  max_attempts: 2
+  base_delay: 2.0
+  max_delay: 30.0
+  backoff: exponential
+  retryable_errors:
+    - AGENT_TIMEOUT
+    - AGENT_RATE_LIMIT
+    - AGENT_JSON_PARSE
+    - MODEL_UNAVAILABLE
+
+# 兜底降级配置
+fallback:
+  strategy: template_mode
+  description: 回退到模板兜底模式，生成 6 章节标准报告
+
+# 上下文配置
+context:
+  max_history_rounds: 3
+  recent_history_rounds: 2
+  dst_compression_threshold: 5
+  context_overflow_threshold: 0.8
+
+# 缓存配置
+cache:
+  enabled: true
+  prefix_version: v8.0.1
+  warmup_on_session_create: false
+  target_hit_rate: 0.95
+
+# 可观测性
+observability:
+  log_level: INFO
+  record_tokens: true
+  record_duration: true
+  record_cache_stats: true
+  record_word_count: true
+  record_replacements_count: true
+
+# 元数据
+metadata:
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  tags:
+    - writer
+    - generation
+    - style_normalizer

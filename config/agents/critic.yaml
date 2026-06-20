@@ -1,0 +1,191 @@
+# Critic Agent 配置
+# 评审 Agent，硬约束校验与自动修复
+# 版本：v8.0
+# 日期：2026-06-19
+
+agent_id: critic
+name: Critic
+description: 评审 Agent，硬约束校验与自动修复
+version: v8.0
+
+# 模型配置
+model: deepseek-r2
+fallback_model: glm-4.6
+temperature: 0.0
+max_tokens: 4096
+top_p: 1.0
+frequency_penalty: 0.0
+presence_penalty: 0.0
+
+# 能力声明
+capabilities:
+  - streaming
+  - thinking
+
+# 适用阶段
+stages:
+  - validation
+
+# 系统提示词
+system_prompt: |
+  你是 ThesisMiner 的评审 Agent（Critic），是硬约束的守护者。
+
+  你的核心职责：
+  1. 重复度评估：基于候选标题联网检索近 5 年硕博论文与期刊，输出新颖性风险评级。
+  2. 标题格式校验：长度、动词前置、模式校验。
+  3. 学术日历校验：研究周期是否在学制内。
+  4. 文献基线校验：综述大纲规划的文献数量是否达标。
+  5. 逻辑自洽校验：研究内容与研究目标的语义重合度。
+  6. 自动修复：对不合规的提案执行确定性修复。
+
+  硬约束规则：
+  - 标题长度：硕士 ≤25 字，博士 ≤30 字，最小 8 字
+  - 标题动词：不以"研究/分析/探讨/调查/实现/构建/设计/开发/优化/改进/评估/验证"开头
+  - 标题模式：不匹配"基于 X 的 Y 研究"套路
+  - 学术日历：硕士 ≤12 月，博士 ≤24 月
+  - 文献基线：硕士 ≥30 篇，博士 ≥50 篇
+  - 逻辑自洽：研究内容与研究目标重合度 ≤70%
+
+  重复度评估：
+  - low：max_similarity < 0.5
+  - medium：0.5 ≤ max_similarity < 0.7
+  - high：max_similarity ≥ 0.7
+
+  自动修复策略：
+  - 标题过长：依存句法截取核心名词短语
+  - 标题动词前置：转换为名词性短语（"研究 X" → "X 的研究"）
+  - 标题模式：重组为突出核心贡献的名词短语
+  - 时间超期：注入分阶段并行执行策略
+  - 文献不足：补充子方向检索词与数据库建议
+
+# 硬约束配置
+hard_constraints:
+  title:
+    max_length_master: 25
+    max_length_doctor: 30
+    min_length: 8
+    forbidden_verbs:
+      - 研究
+      - 分析
+      - 探讨
+      - 调查
+      - 实现
+      - 构建
+      - 设计
+      - 开发
+      - 优化
+      - 改进
+      - 评估
+      - 验证
+    forbidden_patterns:
+      - "基于.+的.+研究"
+      - "基于.+的.+分析"
+      - "基于.+的.+探讨"
+      - "基于.+的.+应用"
+      - "基于.+的.+设计"
+      - "基于.+的.+实现"
+
+  calendar:
+    master_max_months: 12
+    doctor_max_months: 24
+
+  literature:
+    master_min_count: 30
+    doctor_min_count: 50
+
+  logic:
+    max_overlap: 0.7
+
+# 重复度评估配置
+novelty_assessment:
+  time_window: "5y"
+  risk_levels:
+    low:
+      max_similarity: 0.5
+      action: pass
+    medium:
+      max_similarity: 0.7
+      action: downweight
+    high:
+      max_similarity: 1.0
+      action: block
+
+# 评分权重配置（用于新颖性评分）
+scoring_weights:
+  cross_discipline: 0.30
+  method_transfer: 0.25
+  pain_point_breakthrough: 0.25
+  trend_foresight: 0.20
+
+  thresholds:
+    total_score: 60
+    dimension_score: 40
+    max_similarity: 0.3
+
+# 自动修复配置
+auto_repair:
+  enabled: true
+  strategies:
+    title_too_long: extract_core_noun_phrase
+    title_verb_prefix: convert_to_noun_phrase
+    title_pattern: reconstruct_noun_phrase
+    time_exceeded: inject_parallel_strategy
+    literature_insufficient: supplement_search_suggestions
+    logic_overlap: mark_warning
+
+# 阶段门禁规则
+gate_rules:
+  validation:
+    hard_constraints_pass: true
+    auto_repair: true
+    retry_max: 2
+    retry_stage: creativity
+
+# 重试配置
+retry:
+  max_attempts: 2
+  base_delay: 2.0
+  max_delay: 30.0
+  backoff: exponential
+  retryable_errors:
+    - AGENT_TIMEOUT
+    - AGENT_RATE_LIMIT
+    - AGENT_JSON_PARSE
+    - MODEL_UNAVAILABLE
+
+# 兜底降级配置
+fallback:
+  strategy: mark_warning
+  description: 标记 WARNING 但不阻塞，将原始提案传递给 Writer
+
+# 上下文配置
+context:
+  max_history_rounds: 3
+  recent_history_rounds: 2
+  dst_compression_threshold: 5
+  context_overflow_threshold: 0.8
+
+# 缓存配置
+cache:
+  enabled: true
+  prefix_version: v8.0.1
+  warmup_on_session_create: false
+  target_hit_rate: 0.95
+
+# 可观测性
+observability:
+  log_level: INFO
+  record_tokens: true
+  record_duration: true
+  record_cache_stats: true
+  record_repair_count: true
+
+# 元数据
+metadata:
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
+  tags:
+    - critic
+    - validation
+    - hard_constraints

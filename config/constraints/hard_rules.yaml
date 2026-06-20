@@ -1,0 +1,178 @@
+# ThesisMiner v8.0 硬约束规则配置
+# 版本：v8.0
+# 日期：2026-06-19
+# 适用范围：backend/constraints/、backend/orchestration/hooks/hard_rule_interceptor.py
+
+# 标题约束
+title:
+  # 长度约束
+  max_length_master: 25      # 硕士标题最大长度（字）
+  max_length_doctor: 30      # 博士标题最大长度（字）
+  min_length: 8              # 标题最小长度（字）
+
+  # 禁用动词（标题不以这些动词开头）
+  forbidden_verbs:
+    - 研究
+    - 分析
+    - 探讨
+    - 调查
+    - 实现
+    - 构建
+    - 设计
+    - 开发
+    - 优化
+    - 改进
+    - 评估
+    - 验证
+
+  # 禁用模式（标题不匹配这些正则）
+  forbidden_patterns:
+    - "基于.*的研究"          # 太通用
+    - "基于.*的分析"
+    - "基于.*的探讨"
+    - "基于.*的应用研究"
+    - "基于.*的设计"
+    - "基于.*的实现"
+    - ".*的应用研究"          # 太通用
+    - ".*的初步研究"
+    - ".*的探索性研究"
+
+  # 自动修复策略
+  auto_repair:
+    too_long: extract_core_noun_phrase       # 依存句法截取核心名词短语
+    verb_prefix: convert_to_noun_phrase      # 动词前置转名词性短语
+    pattern_match: reconstruct_noun_phrase   # 重组为突出核心贡献的名词短语
+
+# 学术日历约束
+calendar:
+  master_max_years: 1        # 硕士最大年限
+  master_max_months: 12      # 硕士最大月数
+  doctor_max_years: 2        # 博士最大年限
+  doctor_max_months: 24      # 博士最大月数
+
+  # 自动修复策略
+  auto_repair:
+    time_exceeded: inject_parallel_strategy  # 注入分阶段并行执行策略
+
+# 文献基线约束
+literature:
+  master_min_count: 30       # 硕士文献最小数量
+  doctor_min_count: 50       # 博士文献最小数量
+
+  # 推荐数据库
+  recommended_databases:
+    - CNKI                    # 中国知网
+    - WanFang                 # 万方
+    - VIP                     # 维普
+    - Web of Science
+    - Scopus
+    - IEEE Xplore
+    - ACM Digital Library
+    - PubMed
+    - arXiv
+    - Semantic Scholar
+
+  # 自动修复策略
+  auto_repair:
+    insufficient: supplement_search_suggestions  # 补充子方向检索词与数据库建议
+
+# 重复度约束
+duplication:
+  max_similarity: 0.3        # 最大相似度阈值
+  min_novelty_score: 60      # 最小新颖性评分
+
+  # 风险评级阈值
+  risk_thresholds:
+    low: 0.5                 # < 0.5 为低风险
+    medium: 0.7              # 0.5-0.7 为中风险
+    high: 1.0                # ≥ 0.7 为高风险
+
+  # 处理策略
+  actions:
+    low: pass                # 通过
+    medium: downweight       # 降权，要求用户确认
+    high: block              # 阻断，要求调整差异化方向
+
+# 学科匹配约束
+discipline:
+  require_match: true        # 是否要求学科匹配
+
+  # 学科关系映射（部分示例）
+  relations:
+    计算机科学:
+      - 计算机科学
+      - 人工智能
+      - 软件工程
+      - 数据科学
+      - 信息工程
+    人工智能:
+      - 人工智能
+      - 计算机科学
+      - 机器学习
+      - 深度学习
+    医学:
+      - 医学
+      - 临床医学
+      - 生物医学
+      - 医疗信息学
+    教育学:
+      - 教育学
+      - 教育技术
+      - 心理学
+      - 课程与教学论
+
+# 导师方向对齐约束
+advisor:
+  require_alignment: true    # 是否要求导师方向对齐
+  min_alignment_score: 0.3   # 最小对齐度分数
+
+  # 对齐度计算方法
+  alignment_method: keyword_overlap  # 关键词重叠
+
+# 逻辑自洽约束
+logic:
+  max_overlap: 0.7           # 研究内容与研究目标最大重合度
+  overlap_method: jaccard    # Jaccard 相似度
+
+  # 自动修复策略
+  auto_repair:
+    overlap_exceeded: mark_warning  # 标记 WARNING
+
+# 严重级别
+severity:
+  error:                     # 严重错误，阻断流程
+    - title_length
+    - title_verb_prefix
+    - title_pattern
+    - discipline_match
+    - time_feasibility
+    - duplication_threshold
+  warning:                   # 警告，标记但不阻断
+    - advisor_alignment
+    - literature_baseline
+    - logic_consistency
+
+# 校验顺序
+validation_order:
+  - title_length
+  - title_verb_prefix
+  - title_pattern
+  - discipline_match
+  - advisor_alignment
+  - time_feasibility
+  - literature_baseline
+  - duplication_threshold
+  - logic_consistency
+
+# 全局开关
+global:
+  enabled: true
+  strict_mode: false         # 严格模式（warning 也阻断）
+  log_violations: true       # 记录违规日志
+
+# 元数据
+metadata:
+  version: v8.0
+  author: ThesisMiner 团队
+  created_at: 2026-06-19
+  updated_at: 2026-06-19
